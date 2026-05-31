@@ -11,6 +11,8 @@ OpenAI or Bedrock connection alongside.
 import base64
 from typing import Any, Optional
 
+from core_lib.connection.connection import Connection
+
 from llm_core_lib.errors import LlmError, LlmProviderError
 from llm_core_lib.types import LlmCompletion
 
@@ -18,8 +20,15 @@ from llm_core_lib.types import LlmCompletion
 ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
 
 
-class AnthropicConnection(object):
-    """Wraps ``anthropic.Anthropic`` for the Messages API."""
+class AnthropicConnection(Connection):
+    """Wraps ``anthropic.Anthropic`` for the Messages API.
+
+    Implements the ``core_lib.connection.Connection`` context-manager
+    contract so callers can write::
+
+        with factory.get() as conn:
+            completion = conn.complete_text('hello')
+    """
 
     def __init__(
         self,
@@ -73,6 +82,13 @@ class AnthropicConnection(object):
     def close(self) -> None:
         # The anthropic SDK client doesn't require explicit close.
         pass
+
+    def __enter__(self) -> 'AnthropicConnection':
+        return self
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Always call close(); let any exception propagate by returning None.
+        self.close()
 
     def _invoke(
         self, model_id: str, content: list, system: Optional[str],

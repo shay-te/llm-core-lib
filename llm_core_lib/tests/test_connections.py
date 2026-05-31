@@ -6,11 +6,14 @@ touches the network and none of the real SDKs need to be installed.
 import unittest
 
 from llm_core_lib import (
+    AnthropicConnection,
     AnthropicConnectionFactory,
+    BedrockConnection,
     BedrockConnectionFactory,
     LlmCompletion,
     LlmConfigError,
     LlmProviderError,
+    OpenAiConnection,
     OpenAiConnectionFactory,
 )
 from llm_core_lib.tests.fakes import (
@@ -499,6 +502,74 @@ class TestBedrockConnection(unittest.TestCase):
         # Defensive — a malformed payload (e.g. a list at the top
         # level) returns empty text rather than crashing the call.
         self.assertEqual(_extract_text(['unexpected']), '')
+
+
+# ---- Context-manager protocol ----------------------------------------
+
+
+class TestConnectionContextManager(unittest.TestCase):
+    """Every ``*Connection`` extends ``core_lib.connection.Connection``
+    so callers can use ``with factory.get() as conn:`` ergonomics.
+    The exit always calls ``close()`` and lets exceptions propagate."""
+
+    def test_openai_with_block_yields_connection(self):
+        factory = OpenAiConnectionFactory({
+            'model': 'gpt-x', 'api_key': 'sk', 'client': FakeOpenAIClient(),
+        })
+        with factory.get() as conn:
+            self.assertIsInstance(conn, OpenAiConnection)
+            completion = conn.complete_text('hi')
+        self.assertEqual(completion.text, 'hello')
+
+    def test_anthropic_with_block_yields_connection(self):
+        factory = AnthropicConnectionFactory({
+            'model': 'claude-x', 'api_key': 'sk', 'client': FakeAnthropicClient(),
+        })
+        with factory.get() as conn:
+            self.assertIsInstance(conn, AnthropicConnection)
+            completion = conn.complete_text('hi')
+        self.assertEqual(completion.text, 'hi from anthropic')
+
+    def test_bedrock_with_block_yields_connection(self):
+        factory = BedrockConnectionFactory({
+            'model': 'anthropic.x', 'region': 'us-east-1',
+            'client': FakeBedrockClient(),
+        })
+        with factory.get() as conn:
+            self.assertIsInstance(conn, BedrockConnection)
+            completion = conn.complete_text('hi')
+        self.assertEqual(completion.text, 'bedrock reply')
+
+    def test_with_block_exit_calls_close(self):
+        # Spy on close() to confirm the context-manager exit actually
+        # calls it (rather than relying on the no-op default firing).
+        factory = OpenAiConnectionFactory({
+            'model': 'gpt-x', 'api_key': 'sk', 'client': FakeOpenAIClient(),
+        })
+        conn = factory.get()
+        closed = {'count': 0}
+
+        def _spy_close():
+            closed['count'] += 1
+
+        conn.close = _spy_close
+        with conn:
+            pass
+        self.assertEqual(closed['count'], 1)
+
+    def test_with_block_propagates_exceptions(self):
+        # The exit must NOT suppress exceptions raised inside the
+        # ``with`` block.
+        factory = OpenAiConnectionFactory({
+            'model': 'gpt-x', 'api_key': 'sk', 'client': FakeOpenAIClient(),
+        })
+
+        class _Boom(RuntimeError):
+            pass
+
+        with self.assertRaises(_Boom):
+            with factory.get():
+                raise _Boom('inner failure')
 
 
 if __name__ == '__main__':

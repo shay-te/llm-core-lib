@@ -6,14 +6,17 @@ Exposes a single attribute — ``self.registry`` — that's an
 ``example_data.yaml``), the constructor pre-registers every entry under
 ``core_lib.llm.connections``.
 
-The class follows the same shape as
-``agent_core_lib.agent_core_lib.AgentCoreLib`` — thin CoreLib subclass
-that owns one provider/registry attribute and delegates everything
-real to that attribute.
+Thin :class:`core_lib.core_lib.CoreLib` subclass: it owns one
+registry attribute and delegates everything real to it. The class is
+the transport-layer composition root only — prompt preparation belongs
+upstream (in the caller / workflow layer) and is intentionally out of
+scope here. See README → "Boundary with agent-core-lib".
 """
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Optional
+
+from omegaconf import DictConfig
 
 from core_lib.core_lib import CoreLib
 
@@ -25,15 +28,15 @@ class LlmCoreLib(CoreLib):
     """Hosts a single :class:`LlmConnectionRegistry`.
 
     Args:
-        conf: Optional Hydra ``DictConfig`` (or any mapping) whose
+        conf: Optional Hydra ``DictConfig`` whose
             ``core_lib.llm.connections`` is a list of connection
-            dicts. Entries are passed to :meth:`LlmConnectionRegistry.register`
-            in order, so any config error fails the constructor — host
-            apps find out about a bad connection at boot, not at
-            first-call time.
+            entries. Each entry is passed to
+            :meth:`LlmConnectionRegistry.register` in order, so any
+            config error fails the constructor — host apps find out
+            about a bad connection at boot, not at first-call time.
     """
 
-    def __init__(self, conf: Optional[Any] = None):
+    def __init__(self, conf: Optional[DictConfig] = None):
         super().__init__()
         self.config = conf
         self.registry = LlmConnectionRegistry()

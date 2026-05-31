@@ -8,16 +8,24 @@ read it in isolation.
 import base64
 from typing import Any, List, Optional
 
+from core_lib.connection.connection import Connection
+
 from llm_core_lib.errors import LlmConfigError, LlmError, LlmProviderError
 from llm_core_lib.types import LlmCompletion
 
 
-class OpenAiConnection(object):
+class OpenAiConnection(Connection):
     """Wraps ``openai.OpenAI`` for chat-completions + embeddings.
 
     A fresh connection is returned by every
     :meth:`OpenAiConnectionFactory.get` call but the underlying SDK
     client is shared — connections are cheap, the client is not.
+
+    Implements the ``core_lib.connection.Connection`` context-manager
+    contract so callers can write::
+
+        with factory.get() as conn:
+            completion = conn.complete_text('hello')
     """
 
     def __init__(
@@ -84,6 +92,13 @@ class OpenAiConnection(object):
     def close(self) -> None:
         # The openai SDK client doesn't require explicit close.
         pass
+
+    def __enter__(self) -> 'OpenAiConnection':
+        return self
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Always call close(); let any exception propagate by returning None.
+        self.close()
 
     def _invoke_chat(self, model_id: str, messages: list) -> LlmCompletion:
         payload = {

@@ -8,7 +8,9 @@ only owns SDK-client construction + config validation.
 The ``anthropic`` SDK import is local to ``_build_client``; tests
 inject a fake client via ``config['client']``.
 """
-from typing import Any, Mapping
+from typing import Any
+
+from omegaconf import DictConfig
 
 from core_lib.connection.connection_factory import ConnectionFactory
 
@@ -23,7 +25,7 @@ class AnthropicConnectionFactory(ConnectionFactory):
     """One Anthropic SDK client per process. ``get()`` returns a fresh
     :class:`AnthropicConnection` wrapping that shared client."""
 
-    def __init__(self, config: Mapping[str, Any]):
+    def __init__(self, config: DictConfig):
         model_id = config.get('model') or config.get('model_id')
         if not model_id:
             raise LlmConfigError(
@@ -54,7 +56,7 @@ class AnthropicConnectionFactory(ConnectionFactory):
         )
 
     @staticmethod
-    def _build_client(config: Mapping[str, Any]) -> Any:
+    def _build_client(config: DictConfig) -> Any:
         # Integration-only path; unit tests inject ``client``.
         try:  # pragma: no cover — requires the real anthropic SDK
             from anthropic import Anthropic

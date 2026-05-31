@@ -8,7 +8,9 @@ construction + config validation.
 The ``openai`` SDK import is local to ``_build_client`` so installs
 that only use Anthropic or Bedrock don't pay the import cost.
 """
-from typing import Any, Mapping
+from typing import Any
+
+from omegaconf import DictConfig
 
 from core_lib.connection.connection_factory import ConnectionFactory
 
@@ -20,7 +22,7 @@ class OpenAiConnectionFactory(ConnectionFactory):
     """One OpenAI SDK client per process. ``get()`` returns a fresh
     :class:`OpenAiConnection` wrapping that shared client."""
 
-    def __init__(self, config: Mapping[str, Any]):
+    def __init__(self, config: DictConfig):
         # Either the cross-provider ``model`` or OpenAI-native
         # ``model_id`` selects the chat model. Tests inject ``client``
         # directly so the SDK import path stays untouched.
@@ -58,7 +60,7 @@ class OpenAiConnectionFactory(ConnectionFactory):
         )
 
     @staticmethod
-    def _build_client(config: Mapping[str, Any]) -> Any:
+    def _build_client(config: DictConfig) -> Any:
         # Integration-only path; unit tests inject ``client`` so the
         # openai SDK isn't a hard test dep.
         try:  # pragma: no cover — requires the real openai SDK

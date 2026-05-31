@@ -8,7 +8,9 @@ only owns SDK-client construction + config validation.
 The boto3 import is local to ``_build_client`` so installs that only
 use OpenAI or Anthropic don't pay the import cost.
 """
-from typing import Any, Mapping
+from typing import Any
+
+from omegaconf import DictConfig
 
 from core_lib.connection.connection_factory import ConnectionFactory
 
@@ -24,7 +26,7 @@ class BedrockConnectionFactory(ConnectionFactory):
     ``conn.embed(...)`` without knowing about boto3.
     """
 
-    def __init__(self, config: Mapping[str, Any]):
+    def __init__(self, config: DictConfig):
         if not config.get('region'):
             raise LlmConfigError('bedrock connection requires region')
         # Accept either ``model_id`` (Bedrock-native) or ``model`` (the
@@ -61,7 +63,7 @@ class BedrockConnectionFactory(ConnectionFactory):
         )
 
     @staticmethod
-    def _build_client(config: Mapping[str, Any]) -> Any:
+    def _build_client(config: DictConfig) -> Any:
         # Integration-only path; unit tests inject ``client`` in the
         # config so boto3 isn't a hard test dep.
         import boto3  # pragma: no cover — requires boto3 + real AWS creds

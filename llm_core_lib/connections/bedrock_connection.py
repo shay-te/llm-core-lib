@@ -8,6 +8,8 @@ import base64
 import json
 from typing import Any, List, Optional, Tuple
 
+from core_lib.connection.connection import Connection
+
 from llm_core_lib.errors import LlmConfigError, LlmError, LlmProviderError
 from llm_core_lib.types import LlmCompletion
 
@@ -15,12 +17,18 @@ from llm_core_lib.types import LlmCompletion
 _ANTHROPIC_VERSION = 'bedrock-2023-05-31'
 
 
-class BedrockConnection(object):
+class BedrockConnection(Connection):
     """
     Thin provider-abstracted wrapper. The methods are intentionally narrow
     — chat completion, vision, and embedding generation. Anything more
     exotic (tool use, streaming, etc.) belongs in a dedicated client at
     the edge, not in services.
+
+    Implements the ``core_lib.connection.Connection`` context-manager
+    contract so callers can write::
+
+        with factory.get() as conn:
+            completion = conn.complete_text('hello')
     """
 
     def __init__(
@@ -99,6 +107,13 @@ class BedrockConnection(object):
     def close(self) -> None:
         # boto3 clients don't require explicit close.
         pass
+
+    def __enter__(self) -> 'BedrockConnection':
+        return self
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Always call close(); let any exception propagate by returning None.
+        self.close()
 
     def _invoke(self, model_id: str, body_dict: dict) -> Tuple[str, Optional[dict]]:
         try:
