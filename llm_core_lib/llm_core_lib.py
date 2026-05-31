@@ -103,6 +103,10 @@ def _connection_from_mapping(entry: Any) -> LlmConnectionConfig:
         access_key=_optional_str(_attr_or_item(entry, 'access_key')),
         secret_key=_optional_str(_attr_or_item(entry, 'secret_key')),
         endpoint_url=_optional_str(_attr_or_item(entry, 'endpoint_url')),
+        vision_model=_optional_str(_attr_or_item(entry, 'vision_model')),
+        embedding_model=_optional_str(_attr_or_item(entry, 'embedding_model')),
+        max_tokens=int(_attr_or_item(entry, 'max_tokens') or 4096),
+        temperature=float(_attr_or_item(entry, 'temperature') or 0.0),
         extra=extra,
     )
 

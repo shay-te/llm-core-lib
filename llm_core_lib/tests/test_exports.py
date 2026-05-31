@@ -14,35 +14,30 @@ class TestPublicExports(unittest.TestCase):
                     f'llm_core_lib is missing public export {name!r}',
                 )
 
-    def test_top_level_imports_are_callable_or_class(self):
-        # Sanity: a representative sample resolves to the expected kind.
+    def test_factories_are_classes(self):
         from llm_core_lib import (
-            AnthropicLlmProvider,
-            BedrockLlmProvider,
+            AnthropicConnectionFactory,
+            BedrockConnectionFactory,
             LlmConnectionRegistry,
             LlmCoreLib,
-            LlmProvider,
-            OpenAiLlmProvider,
-            create_llm_provider,
+            OpenAiConnectionFactory,
         )
 
         for cls in (
             LlmCoreLib,
             LlmConnectionRegistry,
-            LlmProvider,
-            OpenAiLlmProvider,
-            AnthropicLlmProvider,
-            BedrockLlmProvider,
+            OpenAiConnectionFactory,
+            AnthropicConnectionFactory,
+            BedrockConnectionFactory,
         ):
             self.assertTrue(isinstance(cls, type), f'{cls!r} should be a class')
-        self.assertTrue(callable(create_llm_provider))
+
+    def test_create_connection_factory_is_callable(self):
+        from llm_core_lib import create_connection_factory
+        self.assertTrue(callable(create_connection_factory))
 
     def test_provider_ids_match_literal(self):
-        # LLM_PROVIDER_IDS is the runtime mirror of the LlmProviderId
-        # Literal — keep them in sync. The check here pins the literal
-        # values; if the Literal grows, this test grows with it.
         from llm_core_lib import LLM_PROVIDER_IDS
-
         self.assertEqual(set(LLM_PROVIDER_IDS), {'openai', 'anthropic', 'bedrock'})
 
 
