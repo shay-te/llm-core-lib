@@ -21,7 +21,7 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
     def test_dict_config_hydrates_connections(self):
         # ``extra.client`` injects a fake so the test doesn't require
         # the openai SDK to be installed in CI.
-        from llm_core_lib.tests.fakes import FakeOpenAIClient
+        from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
         cfg = {
             'core_lib': {
                 'llm': {
@@ -31,7 +31,7 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
                             'provider': 'openai',
                             'model': 'gpt-4o-mini',
                             'api_key': 'sk-test',
-                            'extra': {'client': FakeOpenAIClient()},
+                            'extra': {'client': MockOpenAIClient()},
                         },
                     ],
                 },
@@ -88,7 +88,7 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
         # that with a SimpleNamespace tree to confirm _attr_or_item
         # handles both paths.
         from types import SimpleNamespace
-        from llm_core_lib.tests.fakes import FakeOpenAIClient
+        from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
         cfg = SimpleNamespace(
             core_lib=SimpleNamespace(
                 llm=SimpleNamespace(
@@ -104,7 +104,7 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
                             access_key=None,
                             secret_key=None,
                             endpoint_url=None,
-                            extra={'client': FakeOpenAIClient()},
+                            extra={'client': MockOpenAIClient()},
                         ),
                     ],
                 ),

@@ -358,12 +358,14 @@ pre-registers every entry on the shared registry.
 ## Testing / no-network note
 
 All tests are **mocked**. Each factory accepts a `client` key in its
-config dict; the test suite uses
-[`llm_core_lib/tests/fakes.py`](llm_core_lib/tests/fakes.py) which
-mirrors the exact attribute surfaces of `openai.OpenAI`,
-`anthropic.Anthropic`, and a Bedrock-runtime boto3 client. No SDK
-needs to be installed to run the suite, and no test reaches the
-network.
+config dict; the test suite uses the per-provider mocks under
+[`llm_core_lib/tests/mock/`](llm_core_lib/tests/mock/)
+(`mock/openai_client.py` → `MockOpenAIClient`,
+`mock/anthropic_client.py` → `MockAnthropicClient`,
+`mock/bedrock_client.py` → `MockBedrockClient`), each of which mirrors
+the exact attribute surface of the real SDK client the corresponding
+connection touches. No SDK needs to be installed to run the suite, and
+no test reaches the network.
 
 When `llm-core-lib` is installed via `pip` the test command is just:
 
