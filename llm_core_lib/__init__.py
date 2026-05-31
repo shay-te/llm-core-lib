@@ -32,16 +32,16 @@ caller who already knows that pattern picks this up unchanged.
 
 __version__ = '0.2.0'
 
+from llm_core_lib.connections.anthropic_connection import AnthropicConnection
 from llm_core_lib.connections.anthropic_connection_factory import (
-    AnthropicConnection,
     AnthropicConnectionFactory,
 )
+from llm_core_lib.connections.bedrock_connection import BedrockConnection
 from llm_core_lib.connections.bedrock_connection_factory import (
-    BedrockConnection,
     BedrockConnectionFactory,
 )
+from llm_core_lib.connections.openai_connection import OpenAiConnection
 from llm_core_lib.connections.openai_connection_factory import (
-    OpenAiConnection,
     OpenAiConnectionFactory,
 )
 from llm_core_lib.errors import (

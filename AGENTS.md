@@ -1,10 +1,10 @@
 # AGENTS Notes
 
-## Mirror `library-core-lib`'s `BedrockConnectionFactory` shape
+## The connection-factory shape
 
-Every backend in `llm_core_lib/connections/` follows the same shape
-the reviewer asked us to adopt verbatim from
-[`library-core-lib/library_core_lib/connections/bedrock_connection_factory.py`](../library-core-lib/library_core_lib/connections/bedrock_connection_factory.py):
+Every backend in `llm_core_lib/connections/` follows the same shape —
+this is the canonical layout for all three (OpenAI / Anthropic /
+Bedrock) and any future backend:
 
 - `*ConnectionFactory(core_lib.connection.ConnectionFactory)` —
   takes a `Mapping` config, builds the shared SDK client once in
@@ -13,6 +13,10 @@ the reviewer asked us to adopt verbatim from
   `complete_vision(prompt, image_bytes, image_mime, system=None)`,
   `embed(text)` (where the SDK supports it), `close()`.
 - All three return / accept the shared `LlmCompletion` envelope.
+
+The pattern was lifted from `library-core-lib`'s original Bedrock
+factory (now removed from that repo in favor of this one — see the
+"Sibling repos" section in the README).
 
 **Do not** reintroduce a generic provider ABC with
 `chat(LlmChatRequest)` / `stream(...)` signatures here — the reviewer

@@ -7,10 +7,12 @@ OpenAI, Anthropic, and AWS Bedrock behind one `ConnectionFactory` +
 an LLM connection once and resolve a normalized
 `core_lib.connection.ConnectionFactory` by id at call time.
 
-The shape mirrors `library-core-lib`'s
-[`BedrockConnectionFactory`](../library-core-lib/library_core_lib/connections/bedrock_connection_factory.py)
-exactly — a caller who already uses that pattern picks this up
-unchanged.
+The canonical Bedrock connection factory lives in this package, at
+[`llm_core_lib/connections/bedrock_connection_factory.py`](llm_core_lib/connections/bedrock_connection_factory.py)
+(also exported as `llm_core_lib.BedrockConnectionFactory`). The
+matching `OpenAi` and `Anthropic` factories follow the same shape so a
+caller who learns one picks up the others unchanged. `library-core-lib`
+imports its Bedrock factory from here.
 
 ## Architecture
 
@@ -86,8 +88,7 @@ finally:
     conn.close()
 ```
 
-Or build a single backend factory directly (matches the
-`library-core-lib` style):
+Or build a single backend factory directly:
 
 ```python
 from llm_core_lib import BedrockConnectionFactory
@@ -183,24 +184,31 @@ mirrors the exact attribute surfaces of `openai.OpenAI`,
 needs to be installed to run the suite, and no test reaches the
 network.
 
+When `llm-core-lib` is installed via `pip` the test command is just:
+
 ```bash
 python -m unittest discover -s llm_core_lib/tests -p 'test_*.py'
+```
+
+When running from an uninstalled checkout in the Kato workspace
+(`core-lib` not on `sys.path`), prepend `PYTHONPATH`:
+
+```bash
+PYTHONPATH=/Users/shaytessler/Desktop/dev_kato/UNA-2719/core-lib:/Users/shaytessler/Desktop/dev_kato/UNA-2719/llm-core-lib \
+    python -m unittest discover -s llm_core_lib/tests -p 'test_*.py'
 ```
 
 Coverage targets the package modules (`llm_core_lib/*.py`,
 `llm_core_lib/connections/*.py`); the SDK-build branches are marked
 `pragma: no cover` because they require the real SDKs + credentials.
 
-## Sibling repo migrations — future work
+## Sibling repos
 
-`library-core-lib` currently has its own `BedrockConnectionFactory`
-that wraps `boto3` directly. Migrating it (and any other sibling that
-talks to an LLM SDK) to consume `llm-core-lib`'s registry is **planned
-but out of scope for this pass** — this PR only stands up the new
-package. The shape was chosen to make that migration mechanical:
-`llm_core_lib.BedrockConnectionFactory` is API-compatible with
-`library_core_lib.connections.BedrockConnectionFactory` so a caller
-would change only the import path.
+`library-core-lib` consumes `llm_core_lib.BedrockConnectionFactory`
+directly (`from llm_core_lib import BedrockConnectionFactory`); the
+local `library_core_lib.connections.bedrock_connection_factory` module
+has been removed in favor of this one. Other siblings can do the same
+when they need an LLM backend.
 
 ## Architecture boundaries
 

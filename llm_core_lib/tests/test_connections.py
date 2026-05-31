@@ -184,6 +184,34 @@ class TestOpenAiConnection(unittest.TestCase):
         self.assertEqual(conn.vision_model_id, 'gpt-v')
         self.assertEqual(conn.embedding_model, 'emb')
 
+    def test_chat_with_zero_max_tokens_omits_the_field(self):
+        # ``max_tokens=0`` is treated as "let the model decide" — the
+        # payload should NOT carry max_tokens at all.
+        factory, fake = self._factory(max_tokens=0)
+        factory.get().complete_text('hi')
+        self.assertNotIn('max_tokens', fake.chat_calls[0])
+
+    def test_chat_handles_choice_without_message_attribute(self):
+        # Defensive: if a future SDK returns a choice that lacks a
+        # ``message`` attr, treat content as empty rather than crashing.
+        from types import SimpleNamespace
+
+        class _NoMessage(object):
+            def __init__(self):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(
+                        create=lambda **kw: SimpleNamespace(
+                            choices=[SimpleNamespace(finish_reason='stop')],
+                            model='m',
+                            usage=None,
+                        ),
+                    ),
+                )
+
+        factory, _ = self._factory(client=_NoMessage())
+        completion = factory.get().complete_text('hi')
+        self.assertEqual(completion.text, '')
+
 
 # ---- Anthropic --------------------------------------------------------
 
@@ -378,6 +406,13 @@ class TestBedrockConnection(unittest.TestCase):
         vec = factory.get().embed('hi')
         self.assertEqual(vec, [0.1, 0.2])
 
+    def test_embed_without_embedding_model_raises_config_error(self):
+        # Mirrors OpenAI's behavior: missing embedding_model → clear
+        # config error rather than letting boto3 fail on empty modelId.
+        factory, _ = self._factory()  # default config has no embedding_model
+        with self.assertRaises(LlmConfigError):
+            factory.get().embed('hi')
+
     def test_embed_wraps_sdk_exception(self):
         factory, _ = self._factory(
             embedding_model='amazon.titan-embed-text-v1',
@@ -450,17 +485,17 @@ class TestBedrockConnection(unittest.TestCase):
         self.assertIsNone(factory.get().close())
 
     def test_json_default_encodes_bytes(self):
-        from llm_core_lib.connections.bedrock_connection_factory import _json_default
+        from llm_core_lib.connections.bedrock_connection import _json_default
         encoded = _json_default(b'hi')
         self.assertEqual(encoded, 'aGk=')
 
     def test_json_default_rejects_other_types(self):
-        from llm_core_lib.connections.bedrock_connection_factory import _json_default
+        from llm_core_lib.connections.bedrock_connection import _json_default
         with self.assertRaises(TypeError):
             _json_default(object())
 
     def test_extract_text_handles_non_dict_payload(self):
-        from llm_core_lib.connections.bedrock_connection_factory import _extract_text
+        from llm_core_lib.connections.bedrock_connection import _extract_text
         # Defensive — a malformed payload (e.g. a list at the top
         # level) returns empty text rather than crashing the call.
         self.assertEqual(_extract_text(['unexpected']), '')
