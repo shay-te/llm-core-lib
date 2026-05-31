@@ -37,11 +37,9 @@ from llm_core_lib import (
     OpenAiConnectionFactory,
 )
 from llm_core_lib.registry import LlmConnectionRegistry as _RegistryClass
-from llm_core_lib.tests.fakes import (
-    FakeAnthropicClient,
-    FakeBedrockClient,
-    FakeOpenAIClient,
-)
+from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
+from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
+from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
 
 
 FORBIDDEN_TOP_LEVEL_PACKAGES = frozenset({
@@ -146,7 +144,7 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
     """``complete_text`` must not modify the caller's strings."""
 
     def test_openai_forwards_prompt_and_system_unchanged(self):
-        fake = FakeOpenAIClient()
+        fake = MockOpenAIClient()
         factory = OpenAiConnectionFactory(
             {'model': 'gpt-x', 'api_key': 'k', 'client': fake}
         )
@@ -157,7 +155,7 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
         self.assertEqual(sent[1], {'role': 'user', 'content': PREPARED_PROMPT})
 
     def test_anthropic_forwards_prompt_and_system_unchanged(self):
-        fake = FakeAnthropicClient()
+        fake = MockAnthropicClient()
         factory = AnthropicConnectionFactory(
             {'model': 'claude-x', 'api_key': 'k', 'client': fake}
         )
@@ -170,7 +168,7 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
         self.assertEqual(content, [{'type': 'text', 'text': PREPARED_PROMPT}])
 
     def test_bedrock_forwards_prompt_and_system_unchanged(self):
-        fake = FakeBedrockClient()
+        fake = MockBedrockClient()
         factory = BedrockConnectionFactory(
             {'model_id': 'anthropic.fake', 'region': 'us-east-1', 'client': fake}
         )
@@ -219,7 +217,7 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
 
 class TestRegistryHasNoPromptSurface(unittest.TestCase):
     def test_get_returns_factory_without_touching_any_prompt(self):
-        fake = FakeOpenAIClient()
+        fake = MockOpenAIClient()
         registry = LlmConnectionRegistry()
         registry.register(LlmConnectionConfig(
             id='openai-default',
@@ -263,7 +261,7 @@ class TestRegistryHasNoPromptSurface(unittest.TestCase):
 
 class TestVisionAndEmbeddingStayInsideLlmCoreLib(unittest.TestCase):
     def test_anthropic_vision_packages_image_bytes_here(self):
-        fake = FakeAnthropicClient()
+        fake = MockAnthropicClient()
         factory = AnthropicConnectionFactory(
             {'model': 'claude-x', 'vision_model': 'claude-v', 'client': fake}
         )
@@ -286,7 +284,7 @@ class TestVisionAndEmbeddingStayInsideLlmCoreLib(unittest.TestCase):
         self.assertEqual(fake.calls[0]['system'], 'caller-prepared system text')
 
     def test_openai_embed_takes_only_text_and_forwards_it(self):
-        fake = FakeOpenAIClient(embedding=[1.0, 2.0, 3.0])
+        fake = MockOpenAIClient(embedding=[1.0, 2.0, 3.0])
         factory = OpenAiConnectionFactory({
             'model': 'gpt-x',
             'embedding_model': 'text-embedding-3-small',

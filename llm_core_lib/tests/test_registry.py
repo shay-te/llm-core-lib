@@ -12,7 +12,7 @@ from llm_core_lib import (
     LlmMissingConnectionError,
     OpenAiConnectionFactory,
 )
-from llm_core_lib.tests.fakes import FakeOpenAIClient
+from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
 
 
 def _ok_openai(_id: str = 'openai-default') -> LlmConnectionConfig:
@@ -23,7 +23,7 @@ def _ok_openai(_id: str = 'openai-default') -> LlmConnectionConfig:
         provider='openai',
         model='gpt-4o-mini',
         api_key='sk-test',
-        extra={'client': FakeOpenAIClient()},
+        extra={'client': MockOpenAIClient()},
     )
 
 

@@ -10,11 +10,9 @@ from llm_core_lib import (
     OpenAiConnectionFactory,
     create_connection_factory,
 )
-from llm_core_lib.tests.fakes import (
-    FakeAnthropicClient,
-    FakeBedrockClient,
-    FakeOpenAIClient,
-)
+from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
+from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
+from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
 
 
 # Fake clients are injected through ``extra={'client': ...}`` so these
@@ -24,7 +22,7 @@ class TestCreateConnectionFactoryHappyPath(unittest.TestCase):
     def test_openai(self):
         factory = create_connection_factory(LlmConnectionConfig(
             id='_', provider='openai', model='gpt-4o-mini', api_key='sk-test',
-            extra={'client': FakeOpenAIClient()},
+            extra={'client': MockOpenAIClient()},
         ))
         self.assertIsInstance(factory, OpenAiConnectionFactory)
 
@@ -32,7 +30,7 @@ class TestCreateConnectionFactoryHappyPath(unittest.TestCase):
         factory = create_connection_factory(LlmConnectionConfig(
             id='_', provider='anthropic',
             model='claude-3-5-sonnet-latest', api_key='sk-test',
-            extra={'client': FakeAnthropicClient()},
+            extra={'client': MockAnthropicClient()},
         ))
         self.assertIsInstance(factory, AnthropicConnectionFactory)
 
@@ -41,14 +39,14 @@ class TestCreateConnectionFactoryHappyPath(unittest.TestCase):
             id='_', provider='bedrock',
             model='anthropic.claude-3-5-sonnet-20241022-v2:0',
             region='us-east-1',
-            extra={'client': FakeBedrockClient()},
+            extra={'client': MockBedrockClient()},
         ))
         self.assertIsInstance(factory, BedrockConnectionFactory)
 
     def test_provider_name_is_case_insensitive(self):
         factory = create_connection_factory(LlmConnectionConfig(
             id='_', provider='OpenAI', model='gpt-4o-mini', api_key='sk-test',
-            extra={'client': FakeOpenAIClient()},
+            extra={'client': MockOpenAIClient()},
         ))
         self.assertIsInstance(factory, OpenAiConnectionFactory)
 

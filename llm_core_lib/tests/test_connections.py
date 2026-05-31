@@ -16,11 +16,9 @@ from llm_core_lib import (
     OpenAiConnection,
     OpenAiConnectionFactory,
 )
-from llm_core_lib.tests.fakes import (
-    FakeAnthropicClient,
-    FakeBedrockClient,
-    FakeOpenAIClient,
-)
+from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
+from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
+from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
 
 
 # ---- OpenAI -----------------------------------------------------------
@@ -28,7 +26,7 @@ from llm_core_lib.tests.fakes import (
 
 class TestOpenAiConnection(unittest.TestCase):
     def _factory(self, **overrides):
-        fake = overrides.pop('client', FakeOpenAIClient())
+        fake = overrides.pop('client', MockOpenAIClient())
         cfg = {
             'model': 'gpt-x',
             'api_key': 'sk-test',
@@ -39,7 +37,7 @@ class TestOpenAiConnection(unittest.TestCase):
         return OpenAiConnectionFactory(cfg), fake
 
     def test_complete_text_normalizes(self):
-        factory, fake = self._factory(client=FakeOpenAIClient(content='hello', model='gpt-x'))
+        factory, fake = self._factory(client=MockOpenAIClient(content='hello', model='gpt-x'))
         completion = factory.get().complete_text('hi')
         self.assertIsInstance(completion, LlmCompletion)
         self.assertEqual(completion.text, 'hello')
@@ -85,7 +83,7 @@ class TestOpenAiConnection(unittest.TestCase):
 
     def test_embed_passes_text_and_returns_vector(self):
         factory, fake = self._factory(
-            client=FakeOpenAIClient(embedding=[0.7, 0.8, 0.9]),
+            client=MockOpenAIClient(embedding=[0.7, 0.8, 0.9]),
         )
         vec = factory.get().embed('something')
         self.assertEqual(vec, [0.7, 0.8, 0.9])
@@ -101,14 +99,14 @@ class TestOpenAiConnection(unittest.TestCase):
 
     def test_embed_wraps_sdk_exception(self):
         factory, _ = self._factory(
-            client=FakeOpenAIClient(raise_exc=RuntimeError('boom')),
+            client=MockOpenAIClient(raise_exc=RuntimeError('boom')),
         )
         with self.assertRaises(LlmProviderError):
             factory.get().embed('x')
 
     def test_embed_passes_through_llm_error(self):
         factory, _ = self._factory(
-            client=FakeOpenAIClient(raise_exc=LlmProviderError('inner')),
+            client=MockOpenAIClient(raise_exc=LlmProviderError('inner')),
         )
         with self.assertRaises(LlmProviderError) as ctx:
             factory.get().embed('x')
@@ -116,14 +114,14 @@ class TestOpenAiConnection(unittest.TestCase):
 
     def test_chat_wraps_sdk_exception(self):
         factory, _ = self._factory(
-            client=FakeOpenAIClient(raise_exc=RuntimeError('boom')),
+            client=MockOpenAIClient(raise_exc=RuntimeError('boom')),
         )
         with self.assertRaises(LlmProviderError):
             factory.get().complete_text('x')
 
     def test_chat_passes_through_llm_error(self):
         factory, _ = self._factory(
-            client=FakeOpenAIClient(raise_exc=LlmProviderError('inner')),
+            client=MockOpenAIClient(raise_exc=LlmProviderError('inner')),
         )
         with self.assertRaises(LlmProviderError) as ctx:
             factory.get().complete_text('x')
@@ -131,7 +129,7 @@ class TestOpenAiConnection(unittest.TestCase):
 
     def test_response_without_usage(self):
         factory, _ = self._factory(
-            client=FakeOpenAIClient(omit_usage=True),
+            client=MockOpenAIClient(omit_usage=True),
         )
         completion = factory.get().complete_text('x')
         self.assertIsNone(completion.usage)
@@ -160,7 +158,7 @@ class TestOpenAiConnection(unittest.TestCase):
 
     def test_factory_requires_model(self):
         with self.assertRaises(LlmConfigError):
-            OpenAiConnectionFactory({'api_key': 'sk', 'client': FakeOpenAIClient()})
+            OpenAiConnectionFactory({'api_key': 'sk', 'client': MockOpenAIClient()})
 
     def test_factory_requires_api_key_when_no_client_injected(self):
         with self.assertRaises(LlmConfigError):
@@ -171,7 +169,7 @@ class TestOpenAiConnection(unittest.TestCase):
         # hand-rolled yaml configs that mirror the Bedrock factory.
         factory = OpenAiConnectionFactory({
             'model_id': 'gpt-x',
-            'client': FakeOpenAIClient(),
+            'client': MockOpenAIClient(),
         })
         self.assertIsNotNone(factory.get())
 
@@ -221,7 +219,7 @@ class TestOpenAiConnection(unittest.TestCase):
 
 class TestAnthropicConnection(unittest.TestCase):
     def _factory(self, **overrides):
-        fake = overrides.pop('client', FakeAnthropicClient())
+        fake = overrides.pop('client', MockAnthropicClient())
         cfg = {
             'model': 'claude-x',
             'api_key': 'sk-test',
@@ -232,7 +230,7 @@ class TestAnthropicConnection(unittest.TestCase):
 
     def test_complete_text_normalizes(self):
         factory, _ = self._factory(
-            client=FakeAnthropicClient(content='hi', model='claude-x'),
+            client=MockAnthropicClient(content='hi', model='claude-x'),
         )
         completion = factory.get().complete_text('hello')
         self.assertEqual(completion.text, 'hi')
@@ -282,7 +280,7 @@ class TestAnthropicConnection(unittest.TestCase):
         self.assertGreater(fake.calls[0]['max_tokens'], 0)
 
     def test_concatenates_text_blocks(self):
-        factory, _ = self._factory(client=FakeAnthropicClient(content_blocks=[
+        factory, _ = self._factory(client=MockAnthropicClient(content_blocks=[
             {'type': 'text', 'text': 'hello '},
             {'type': 'thinking', 'text': 'IGNORED'},
             {'type': 'text', 'text': 'world'},
@@ -291,28 +289,28 @@ class TestAnthropicConnection(unittest.TestCase):
 
     def test_chat_wraps_sdk_exception(self):
         factory, _ = self._factory(
-            client=FakeAnthropicClient(raise_exc=RuntimeError('boom')),
+            client=MockAnthropicClient(raise_exc=RuntimeError('boom')),
         )
         with self.assertRaises(LlmProviderError):
             factory.get().complete_text('x')
 
     def test_chat_passes_through_llm_error(self):
         factory, _ = self._factory(
-            client=FakeAnthropicClient(raise_exc=LlmProviderError('inner')),
+            client=MockAnthropicClient(raise_exc=LlmProviderError('inner')),
         )
         with self.assertRaises(LlmProviderError) as ctx:
             factory.get().complete_text('x')
         self.assertEqual(str(ctx.exception), 'inner')
 
     def test_response_without_usage(self):
-        factory, _ = self._factory(client=FakeAnthropicClient(omit_usage=True))
+        factory, _ = self._factory(client=MockAnthropicClient(omit_usage=True))
         completion = factory.get().complete_text('x')
         self.assertIsNone(completion.usage)
 
     def test_factory_requires_model(self):
         with self.assertRaises(LlmConfigError):
             AnthropicConnectionFactory({
-                'api_key': 'sk', 'client': FakeAnthropicClient(),
+                'api_key': 'sk', 'client': MockAnthropicClient(),
             })
 
     def test_factory_requires_api_key_when_no_client_injected(self):
@@ -335,7 +333,7 @@ class TestAnthropicConnection(unittest.TestCase):
 
 class TestBedrockConnection(unittest.TestCase):
     def _factory(self, **overrides):
-        fake = overrides.pop('client', FakeBedrockClient())
+        fake = overrides.pop('client', MockBedrockClient())
         cfg = {
             'model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
             'region': 'us-east-1',
@@ -345,7 +343,7 @@ class TestBedrockConnection(unittest.TestCase):
         return BedrockConnectionFactory(cfg), fake
 
     def test_complete_text_normalizes(self):
-        factory, _ = self._factory(client=FakeBedrockClient(content='br hi'))
+        factory, _ = self._factory(client=MockBedrockClient(content='br hi'))
         completion = factory.get().complete_text('hi')
         self.assertEqual(completion.text, 'br hi')
         self.assertEqual(
@@ -378,14 +376,14 @@ class TestBedrockConnection(unittest.TestCase):
         self.assertEqual(content[1], {'type': 'text', 'text': 'describe'})
 
     def test_legacy_completion_shape(self):
-        factory, _ = self._factory(client=FakeBedrockClient(
+        factory, _ = self._factory(client=MockBedrockClient(
             legacy_completion='legacy-text',
         ))
         completion = factory.get().complete_text('hi')
         self.assertEqual(completion.text, 'legacy-text')
 
     def test_titan_results_shape(self):
-        factory, _ = self._factory(client=FakeBedrockClient(
+        factory, _ = self._factory(client=MockBedrockClient(
             titan_results=['titan-text'],
         ))
         completion = factory.get().complete_text('hi')
@@ -394,7 +392,7 @@ class TestBedrockConnection(unittest.TestCase):
     def test_embed_returns_embedding_vector(self):
         factory, _ = self._factory(
             embedding_model='amazon.titan-embed-text-v1',
-            client=FakeBedrockClient(embedding=[0.4, 0.5, 0.6]),
+            client=MockBedrockClient(embedding=[0.4, 0.5, 0.6]),
         )
         vec = factory.get().embed('hi')
         self.assertEqual(vec, [0.4, 0.5, 0.6])
@@ -404,7 +402,7 @@ class TestBedrockConnection(unittest.TestCase):
         # shape) the adapter should still surface the first vector.
         factory, _ = self._factory(
             embedding_model='cohere.embed-english-v3',
-            client=FakeBedrockClient(),  # default → embeddings: [[0.1, 0.2]]
+            client=MockBedrockClient(),  # default → embeddings: [[0.1, 0.2]]
         )
         vec = factory.get().embed('hi')
         self.assertEqual(vec, [0.1, 0.2])
@@ -419,7 +417,7 @@ class TestBedrockConnection(unittest.TestCase):
     def test_embed_wraps_sdk_exception(self):
         factory, _ = self._factory(
             embedding_model='amazon.titan-embed-text-v1',
-            client=FakeBedrockClient(raise_exc=RuntimeError('aws down')),
+            client=MockBedrockClient(raise_exc=RuntimeError('aws down')),
         )
         with self.assertRaises(LlmProviderError):
             factory.get().embed('hi')
@@ -427,21 +425,21 @@ class TestBedrockConnection(unittest.TestCase):
     def test_embed_passes_through_llm_error(self):
         factory, _ = self._factory(
             embedding_model='amazon.titan-embed-text-v1',
-            client=FakeBedrockClient(raise_exc=LlmProviderError('inner')),
+            client=MockBedrockClient(raise_exc=LlmProviderError('inner')),
         )
         with self.assertRaises(LlmProviderError) as ctx:
             factory.get().embed('hi')
         self.assertEqual(str(ctx.exception), 'inner')
 
     def test_chat_wraps_sdk_exception(self):
-        factory, _ = self._factory(client=FakeBedrockClient(
+        factory, _ = self._factory(client=MockBedrockClient(
             raise_exc=RuntimeError('aws down'),
         ))
         with self.assertRaises(LlmProviderError):
             factory.get().complete_text('hi')
 
     def test_chat_passes_through_llm_error(self):
-        factory, _ = self._factory(client=FakeBedrockClient(
+        factory, _ = self._factory(client=MockBedrockClient(
             raise_exc=LlmProviderError('inner'),
         ))
         with self.assertRaises(LlmProviderError) as ctx:
@@ -450,18 +448,18 @@ class TestBedrockConnection(unittest.TestCase):
 
     def test_factory_requires_region(self):
         with self.assertRaises(LlmConfigError):
-            BedrockConnectionFactory({'model': 'anthropic.x', 'client': FakeBedrockClient()})
+            BedrockConnectionFactory({'model': 'anthropic.x', 'client': MockBedrockClient()})
 
     def test_factory_requires_model(self):
         with self.assertRaises(LlmConfigError):
-            BedrockConnectionFactory({'region': 'us-east-1', 'client': FakeBedrockClient()})
+            BedrockConnectionFactory({'region': 'us-east-1', 'client': MockBedrockClient()})
 
     def test_factory_accepts_model_id_alias(self):
         # Bedrock-native ``model_id`` key works alongside ``model``.
         factory = BedrockConnectionFactory({
             'model_id': 'anthropic.x',
             'region': 'us-east-1',
-            'client': FakeBedrockClient(),
+            'client': MockBedrockClient(),
         })
         self.assertEqual(factory.get().model_id, 'anthropic.x')
 
@@ -470,7 +468,7 @@ class TestBedrockConnection(unittest.TestCase):
             'model': 'anthropic.x',
             'region': 'us-east-1',
             'embedding_model_id': 'amazon.titan-embed-text-v1',
-            'client': FakeBedrockClient(embedding=[0.1]),
+            'client': MockBedrockClient(embedding=[0.1]),
         })
         self.assertEqual(factory.get().embedding_model, 'amazon.titan-embed-text-v1')
 
@@ -479,7 +477,7 @@ class TestBedrockConnection(unittest.TestCase):
             'model': 'anthropic.x',
             'region': 'us-east-1',
             'vision_model_id': 'bedrock.vision',
-            'client': FakeBedrockClient(),
+            'client': MockBedrockClient(),
         })
         self.assertEqual(factory.get().vision_model_id, 'bedrock.vision')
 
@@ -514,7 +512,7 @@ class TestConnectionContextManager(unittest.TestCase):
 
     def test_openai_with_block_yields_connection(self):
         factory = OpenAiConnectionFactory({
-            'model': 'gpt-x', 'api_key': 'sk', 'client': FakeOpenAIClient(),
+            'model': 'gpt-x', 'api_key': 'sk', 'client': MockOpenAIClient(),
         })
         with factory.get() as conn:
             self.assertIsInstance(conn, OpenAiConnection)
@@ -523,7 +521,7 @@ class TestConnectionContextManager(unittest.TestCase):
 
     def test_anthropic_with_block_yields_connection(self):
         factory = AnthropicConnectionFactory({
-            'model': 'claude-x', 'api_key': 'sk', 'client': FakeAnthropicClient(),
+            'model': 'claude-x', 'api_key': 'sk', 'client': MockAnthropicClient(),
         })
         with factory.get() as conn:
             self.assertIsInstance(conn, AnthropicConnection)
@@ -533,7 +531,7 @@ class TestConnectionContextManager(unittest.TestCase):
     def test_bedrock_with_block_yields_connection(self):
         factory = BedrockConnectionFactory({
             'model': 'anthropic.x', 'region': 'us-east-1',
-            'client': FakeBedrockClient(),
+            'client': MockBedrockClient(),
         })
         with factory.get() as conn:
             self.assertIsInstance(conn, BedrockConnection)
@@ -544,7 +542,7 @@ class TestConnectionContextManager(unittest.TestCase):
         # Spy on close() to confirm the context-manager exit actually
         # calls it (rather than relying on the no-op default firing).
         factory = OpenAiConnectionFactory({
-            'model': 'gpt-x', 'api_key': 'sk', 'client': FakeOpenAIClient(),
+            'model': 'gpt-x', 'api_key': 'sk', 'client': MockOpenAIClient(),
         })
         conn = factory.get()
         closed = {'count': 0}
@@ -561,7 +559,7 @@ class TestConnectionContextManager(unittest.TestCase):
         # The exit must NOT suppress exceptions raised inside the
         # ``with`` block.
         factory = OpenAiConnectionFactory({
-            'model': 'gpt-x', 'api_key': 'sk', 'client': FakeOpenAIClient(),
+            'model': 'gpt-x', 'api_key': 'sk', 'client': MockOpenAIClient(),
         })
 
         class _Boom(RuntimeError):
