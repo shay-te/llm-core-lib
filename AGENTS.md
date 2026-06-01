@@ -1,5 +1,31 @@
 # AGENTS Notes
 
+## Config reads — always fetch → validate → use, in that order
+
+Any method that reads from `DictConfig` (every `*ConnectionFactory.__init__`
+and every `_build_client`) must be structured as three explicit
+blocks, in this order:
+
+1. **fetch** — pull every value the method needs out of the config
+   into named locals at the top. One `config.get('key')` per value.
+   Required keys are pulled with no fallback (`config.get('key')`);
+   genuinely-optional values with a real default may keep one
+   (`config.get('temperature', 0.0)`).
+2. **validate** — every None / falsy check + `raise LlmConfigError(...)`
+   lives in one contiguous block immediately after the fetch.
+3. **use** — assign to `self.*`, call collaborators, build SDK
+   clients. By this point every value is a named local that has
+   passed validation.
+
+Add `# 1. fetch` / `# 2. validate` / `# 3. use` markers — they're
+load-bearing for readability and the operator has explicitly accepted
+them. Do **not** call `config.get(...)` from inside the "use" block;
+hoist it up to the fetch block. The pattern applies recursively —
+`_build_client` follows the same internal layout.
+
+See `BedrockConnectionFactory`, `AnthropicConnectionFactory`, and
+`OpenAiConnectionFactory` for the canonical shape.
+
 ## The connection-factory shape
 
 Every backend in `llm_core_lib/connections/` follows the same shape —
