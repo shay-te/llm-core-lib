@@ -115,29 +115,42 @@ class OpenAiConnection(Connection):
         except Exception as exc:  # noqa: BLE001
             raise LlmProviderError(f'openai chat failed: {exc}') from exc
 
+        # 1. fetch — every field we touch on the raw SDK response,
+        # pulled into a named local up front. Same rule as the
+        # factory's config reads.
+        response_model = getattr(raw, 'model', None)
         choices = getattr(raw, 'choices', None) or []
+        usage_obj = getattr(raw, 'usage', None)
+
+        # 2. validate / normalize
         if not choices:
             raise LlmProviderError('openai response carried no choices')
+        if not response_model:
+            response_model = model_id
+
         choice = choices[0]
         message = getattr(choice, 'message', None)
-        text = ''
+        message_content = ''
         if message is not None:
-            text = getattr(message, 'content', None) or ''
+            message_content = getattr(message, 'content', None) or ''
 
-        usage_obj = getattr(raw, 'usage', None)
         usage = None
         if usage_obj is not None:
+            prompt_tokens = int(getattr(usage_obj, 'prompt_tokens', 0) or 0)
+            completion_tokens = int(
+                getattr(usage_obj, 'completion_tokens', 0) or 0
+            )
+            total_tokens = int(getattr(usage_obj, 'total_tokens', 0) or 0)
             usage = {
-                'prompt_tokens': int(getattr(usage_obj, 'prompt_tokens', 0) or 0),
-                'completion_tokens': int(
-                    getattr(usage_obj, 'completion_tokens', 0) or 0
-                ),
-                'total_tokens': int(getattr(usage_obj, 'total_tokens', 0) or 0),
+                'prompt_tokens': prompt_tokens,
+                'completion_tokens': completion_tokens,
+                'total_tokens': total_tokens,
             }
 
+        # 3. use — assemble the public LlmCompletion.
         return LlmCompletion(
-            text=text,
-            model=getattr(raw, 'model', model_id) or model_id,
+            text=message_content,
+            model=response_model,
             usage=usage,
         )
 

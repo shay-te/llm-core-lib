@@ -99,10 +99,23 @@ class BedrockConnection(Connection):
         except Exception as exc:  # noqa: BLE001
             raise LlmProviderError(f'bedrock embed failed: {exc}') from exc
         payload = json.loads(resp['body'].read())
+        # 1. fetch — every key we may consume out of the JSON response.
         # Titan returns `embedding`; Cohere-on-Bedrock returns
-        # `embeddings`. Accept either, fall back to empty list if the
-        # model returns neither.
-        return payload.get('embedding') or (payload.get('embeddings') or [[]])[0]
+        # `embeddings`. Pull both up front, decide which shape we got
+        # next, then return last.
+        embedding = payload.get('embedding')
+        embeddings_array = payload.get('embeddings')
+
+        # 2. decide which shape is populated.
+        if embedding:
+            chosen = embedding
+        elif embeddings_array:
+            chosen = embeddings_array[0]
+        else:
+            chosen = []
+
+        # 3. use.
+        return chosen
 
     def close(self) -> None:
         # boto3 clients don't require explicit close.
@@ -129,8 +142,15 @@ class BedrockConnection(Connection):
             raise LlmProviderError(f'bedrock invoke_model failed: {exc}') from exc
 
         payload = json.loads(resp['body'].read())
+        # 1. fetch — pull every field _invoke touches out of the
+        # response payload into named locals.
+        payload_is_dict = isinstance(payload, dict)
+        usage = payload.get('usage') if payload_is_dict else None
+
+        # 2. normalize text via the shape-aware extractor.
         text = _extract_text(payload)
-        usage = payload.get('usage') if isinstance(payload, dict) else None
+
+        # 3. use.
         return text, usage
 
     def _build_messages_body(
@@ -166,20 +186,33 @@ class BedrockConnection(Connection):
 
 
 def _extract_text(payload: Any) -> str:
-    # Bedrock Anthropic-shaped response — content is a list of blocks.
-    if isinstance(payload, dict) and isinstance(payload.get('content'), list):
-        return ''.join(
-            part.get('text', '')
-            for part in payload['content']
-            if isinstance(part, dict)
-        )
+    if not isinstance(payload, dict):
+        return ''
+
+    # 1. fetch — every key we might consume, pulled into named locals.
+    content_blocks = payload.get('content')
+    legacy_completion = payload.get('completion')
+    titan_results = payload.get('results')
+
+    # 2. decide which response shape is populated.
+    # Bedrock Anthropic-shaped → content is a list of blocks.
+    if isinstance(content_blocks, list):
+        text_parts = []
+        for part in content_blocks:
+            if isinstance(part, dict):
+                part_text = part.get('text', '')
+                text_parts.append(part_text)
+        return ''.join(text_parts)
+
     # Legacy / Titan-shaped fallback.
-    if isinstance(payload, dict):
-        return (
-            payload.get('completion')
-            or (payload.get('results') or [{}])[0].get('outputText', '')
-            or ''
-        )
+    if legacy_completion:
+        return legacy_completion
+    if titan_results:
+        first_result = titan_results[0] if titan_results else {}
+        first_output = first_result.get('outputText', '') if isinstance(first_result, dict) else ''
+        return first_output or ''
+
+    # 3. use — no recognised shape.
     return ''
 
 

@@ -27,40 +27,38 @@ class BedrockConnectionFactory(ConnectionFactory):
     """
 
     def __init__(self, config: DictConfig):
-        # 1. fetch — pull everything out of config into named locals first.
-        # Accept either ``model_id`` (Bedrock-native) or ``model`` (the
-        # cross-provider registry key) so the same factory works whether
-        # you wire it from a hand-rolled Bedrock yaml or from an
-        # LlmConnectionConfig that uses ``model``.
+        # 1. fetch — every value, one canonical key per value, no fallback.
         region = config.get('region')
-        model_id = config.get('model_id') or config.get('model')
-        vision_model_id = (
-            config.get('vision_model_id') or config.get('vision_model') or model_id
-        )
-        embedding_model = (
-            config.get('embedding_model')
-            or config.get('embedding_model_id')
-            or ''
-        )
-        max_tokens = int(config.get('max_tokens', 4096))
-        temperature = float(config.get('temperature', 0.0))
+        model = config.get('model')
+        vision_model = config.get('vision_model')
+        embedding_model = config.get('embedding_model')
+        max_tokens = config.get('max_tokens')
+        temperature = config.get('temperature')
         injected_client = config.get('client')
 
-        # 2. validate — every required value, in one place.
+        # 2. validate — every required key fails fast if missing. Strings
+        # use truthy-check (rejects None AND empty string); numerics use
+        # is-None (so e.g. max_tokens=0 stays valid).
         if not region:
             raise LlmConfigError('bedrock connection requires region')
-        if not model_id:
-            raise LlmConfigError(
-                'bedrock connection requires model_id (or model)'
-            )
+        if not model:
+            raise LlmConfigError('bedrock connection requires model')
+        if not vision_model:
+            raise LlmConfigError('bedrock connection requires vision_model')
+        if not embedding_model:
+            raise LlmConfigError('bedrock connection requires embedding_model')
+        if max_tokens is None:
+            raise LlmConfigError('bedrock connection requires max_tokens')
+        if temperature is None:
+            raise LlmConfigError('bedrock connection requires temperature')
 
         # 3. use — assign + lazy-build the SDK client.
         self._config = config
-        self._model_id = model_id
-        self._vision_model_id = vision_model_id
+        self._model_id = model
+        self._vision_model_id = vision_model
         self._embedding_model = embedding_model
-        self._max_tokens = max_tokens
-        self._temperature = temperature
+        self._max_tokens = int(max_tokens)
+        self._temperature = float(temperature)
         self._client = injected_client or self._build_client(config)
 
     def get(self, *args, **kwargs) -> BedrockConnection:

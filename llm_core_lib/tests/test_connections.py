@@ -29,8 +29,11 @@ class TestOpenAiConnection(unittest.TestCase):
         fake = overrides.pop('client', MockOpenAIClient())
         cfg = {
             'model': 'gpt-x',
-            'api_key': 'sk-test',
+            'vision_model': 'gpt-x',
             'embedding_model': 'text-embedding-3-small',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'sk-test',
             'client': fake,
         }
         cfg.update(overrides)
@@ -92,10 +95,10 @@ class TestOpenAiConnection(unittest.TestCase):
             fake.embedding_calls[0]['model'], 'text-embedding-3-small',
         )
 
-    def test_embed_without_embedding_model_raises_config_error(self):
-        factory, _ = self._factory(embedding_model=None)
+    def test_factory_rejects_missing_embedding_model(self):
+        # Strict-required at __init__ now — the embed-time fallback is gone.
         with self.assertRaises(LlmConfigError):
-            factory.get().embed('something')
+            self._factory(embedding_model=None)
 
     def test_embed_wraps_sdk_exception(self):
         factory, _ = self._factory(
@@ -158,20 +161,29 @@ class TestOpenAiConnection(unittest.TestCase):
 
     def test_factory_requires_model(self):
         with self.assertRaises(LlmConfigError):
-            OpenAiConnectionFactory({'api_key': 'sk', 'client': MockOpenAIClient()})
+            self._factory(model=None)
+
+    def test_factory_requires_vision_model(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(vision_model=None)
+
+    def test_factory_requires_max_tokens(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(max_tokens=None)
+
+    def test_factory_requires_temperature(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(temperature=None)
 
     def test_factory_requires_api_key_when_no_client_injected(self):
         with self.assertRaises(LlmConfigError):
-            OpenAiConnectionFactory({'model': 'gpt-x'})
-
-    def test_factory_model_id_alias_accepted(self):
-        # Bedrock-native ``model_id`` key works too — convenience for
-        # hand-rolled yaml configs that mirror the Bedrock factory.
-        factory = OpenAiConnectionFactory({
-            'model_id': 'gpt-x',
-            'client': MockOpenAIClient(),
-        })
-        self.assertIsNotNone(factory.get())
+            OpenAiConnectionFactory({
+                'model': 'gpt-x',
+                'vision_model': 'gpt-x',
+                'embedding_model': 'emb',
+                'max_tokens': 4096,
+                'temperature': 0.0,
+            })
 
     def test_connection_close_is_noop(self):
         factory, _ = self._factory()
@@ -222,6 +234,9 @@ class TestAnthropicConnection(unittest.TestCase):
         fake = overrides.pop('client', MockAnthropicClient())
         cfg = {
             'model': 'claude-x',
+            'vision_model': 'claude-x',
+            'max_tokens': 4096,
+            'temperature': 0.0,
             'api_key': 'sk-test',
             'client': fake,
         }
@@ -274,10 +289,12 @@ class TestAnthropicConnection(unittest.TestCase):
         factory.get().complete_vision('hi', b'x', system='be brief')
         self.assertEqual(fake.calls[0]['system'], 'be brief')
 
-    def test_default_max_tokens_filled(self):
-        factory, fake = self._factory()
+    def test_configured_max_tokens_is_forwarded_to_sdk(self):
+        # No silent default anymore — whatever max_tokens the config
+        # carries is what the SDK call receives verbatim.
+        factory, fake = self._factory(max_tokens=2048)
         factory.get().complete_text('hi')
-        self.assertGreater(fake.calls[0]['max_tokens'], 0)
+        self.assertEqual(fake.calls[0]['max_tokens'], 2048)
 
     def test_concatenates_text_blocks(self):
         factory, _ = self._factory(client=MockAnthropicClient(content_blocks=[
@@ -309,13 +326,28 @@ class TestAnthropicConnection(unittest.TestCase):
 
     def test_factory_requires_model(self):
         with self.assertRaises(LlmConfigError):
-            AnthropicConnectionFactory({
-                'api_key': 'sk', 'client': MockAnthropicClient(),
-            })
+            self._factory(model=None)
+
+    def test_factory_requires_vision_model(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(vision_model=None)
+
+    def test_factory_requires_max_tokens(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(max_tokens=None)
+
+    def test_factory_requires_temperature(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(temperature=None)
 
     def test_factory_requires_api_key_when_no_client_injected(self):
         with self.assertRaises(LlmConfigError):
-            AnthropicConnectionFactory({'model': 'claude-x'})
+            AnthropicConnectionFactory({
+                'model': 'claude-x',
+                'vision_model': 'claude-x',
+                'max_tokens': 4096,
+                'temperature': 0.0,
+            })
 
     def test_connection_close_is_noop(self):
         factory, _ = self._factory()
@@ -336,6 +368,10 @@ class TestBedrockConnection(unittest.TestCase):
         fake = overrides.pop('client', MockBedrockClient())
         cfg = {
             'model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            'vision_model': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            'embedding_model': 'amazon.titan-embed-text-v1',
+            'max_tokens': 4096,
+            'temperature': 0.0,
             'region': 'us-east-1',
             'client': fake,
         }
@@ -407,12 +443,10 @@ class TestBedrockConnection(unittest.TestCase):
         vec = factory.get().embed('hi')
         self.assertEqual(vec, [0.1, 0.2])
 
-    def test_embed_without_embedding_model_raises_config_error(self):
-        # Mirrors OpenAI's behavior: missing embedding_model → clear
-        # config error rather than letting boto3 fail on empty modelId.
-        factory, _ = self._factory()  # default config has no embedding_model
+    def test_factory_rejects_missing_embedding_model(self):
+        # Strict-required at __init__ now — the embed-time fallback is gone.
         with self.assertRaises(LlmConfigError):
-            factory.get().embed('hi')
+            self._factory(embedding_model=None)
 
     def test_embed_wraps_sdk_exception(self):
         factory, _ = self._factory(
@@ -448,38 +482,38 @@ class TestBedrockConnection(unittest.TestCase):
 
     def test_factory_requires_region(self):
         with self.assertRaises(LlmConfigError):
-            BedrockConnectionFactory({'model': 'anthropic.x', 'client': MockBedrockClient()})
+            self._factory(region=None)
 
     def test_factory_requires_model(self):
         with self.assertRaises(LlmConfigError):
-            BedrockConnectionFactory({'region': 'us-east-1', 'client': MockBedrockClient()})
+            self._factory(model=None)
 
-    def test_factory_accepts_model_id_alias(self):
-        # Bedrock-native ``model_id`` key works alongside ``model``.
-        factory = BedrockConnectionFactory({
-            'model_id': 'anthropic.x',
-            'region': 'us-east-1',
-            'client': MockBedrockClient(),
-        })
-        self.assertEqual(factory.get().model_id, 'anthropic.x')
+    def test_factory_requires_vision_model(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(vision_model=None)
 
-    def test_factory_accepts_embedding_model_id_alias(self):
-        factory = BedrockConnectionFactory({
-            'model': 'anthropic.x',
-            'region': 'us-east-1',
-            'embedding_model_id': 'amazon.titan-embed-text-v1',
-            'client': MockBedrockClient(embedding=[0.1]),
-        })
-        self.assertEqual(factory.get().embedding_model, 'amazon.titan-embed-text-v1')
+    def test_factory_requires_max_tokens(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(max_tokens=None)
 
-    def test_factory_accepts_vision_model_id_alias(self):
-        factory = BedrockConnectionFactory({
-            'model': 'anthropic.x',
-            'region': 'us-east-1',
-            'vision_model_id': 'bedrock.vision',
-            'client': MockBedrockClient(),
-        })
-        self.assertEqual(factory.get().vision_model_id, 'bedrock.vision')
+    def test_factory_requires_temperature(self):
+        with self.assertRaises(LlmConfigError):
+            self._factory(temperature=None)
+
+    def test_factory_rejects_legacy_model_id_alias(self):
+        # The Bedrock-native ``model_id`` alias was removed — only the
+        # canonical ``model`` key is accepted. A config that uses the
+        # old key (and omits ``model``) must fail at __init__.
+        with self.assertRaises(LlmConfigError):
+            BedrockConnectionFactory({
+                'model_id': 'anthropic.x',
+                'vision_model': 'anthropic.x',
+                'embedding_model': 'emb',
+                'max_tokens': 4096,
+                'temperature': 0.0,
+                'region': 'us-east-1',
+                'client': MockBedrockClient(),
+            })
 
     def test_connection_close_is_noop(self):
         factory, _ = self._factory()
@@ -512,7 +546,13 @@ class TestConnectionContextManager(unittest.TestCase):
 
     def test_openai_with_block_yields_connection(self):
         factory = OpenAiConnectionFactory({
-            'model': 'gpt-x', 'api_key': 'sk', 'client': MockOpenAIClient(),
+            'model': 'gpt-x',
+            'vision_model': 'gpt-x',
+            'embedding_model': 'emb',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'sk',
+            'client': MockOpenAIClient(),
         })
         with factory.get() as conn:
             self.assertIsInstance(conn, OpenAiConnection)
@@ -521,7 +561,12 @@ class TestConnectionContextManager(unittest.TestCase):
 
     def test_anthropic_with_block_yields_connection(self):
         factory = AnthropicConnectionFactory({
-            'model': 'claude-x', 'api_key': 'sk', 'client': MockAnthropicClient(),
+            'model': 'claude-x',
+            'vision_model': 'claude-x',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'sk',
+            'client': MockAnthropicClient(),
         })
         with factory.get() as conn:
             self.assertIsInstance(conn, AnthropicConnection)
@@ -530,7 +575,12 @@ class TestConnectionContextManager(unittest.TestCase):
 
     def test_bedrock_with_block_yields_connection(self):
         factory = BedrockConnectionFactory({
-            'model': 'anthropic.x', 'region': 'us-east-1',
+            'model': 'anthropic.x',
+            'vision_model': 'anthropic.x',
+            'embedding_model': 'emb',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'region': 'us-east-1',
             'client': MockBedrockClient(),
         })
         with factory.get() as conn:
@@ -538,13 +588,21 @@ class TestConnectionContextManager(unittest.TestCase):
             completion = conn.complete_text('hi')
         self.assertEqual(completion.text, 'bedrock reply')
 
+    def _openai_factory(self):
+        return OpenAiConnectionFactory({
+            'model': 'gpt-x',
+            'vision_model': 'gpt-x',
+            'embedding_model': 'emb',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'sk',
+            'client': MockOpenAIClient(),
+        })
+
     def test_with_block_exit_calls_close(self):
         # Spy on close() to confirm the context-manager exit actually
         # calls it (rather than relying on the no-op default firing).
-        factory = OpenAiConnectionFactory({
-            'model': 'gpt-x', 'api_key': 'sk', 'client': MockOpenAIClient(),
-        })
-        conn = factory.get()
+        conn = self._openai_factory().get()
         closed = {'count': 0}
 
         def _spy_close():
@@ -558,9 +616,7 @@ class TestConnectionContextManager(unittest.TestCase):
     def test_with_block_propagates_exceptions(self):
         # The exit must NOT suppress exceptions raised inside the
         # ``with`` block.
-        factory = OpenAiConnectionFactory({
-            'model': 'gpt-x', 'api_key': 'sk', 'client': MockOpenAIClient(),
-        })
+        factory = self._openai_factory()
 
         class _Boom(RuntimeError):
             pass

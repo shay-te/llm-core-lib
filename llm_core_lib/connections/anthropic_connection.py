@@ -109,13 +109,25 @@ class AnthropicConnection(Connection):
         except Exception as exc:  # noqa: BLE001
             raise LlmProviderError(f'anthropic chat failed: {exc}') from exc
 
-        text = ''.join(
-            getattr(block, 'text', '') or ''
-            for block in (getattr(raw, 'content', None) or [])
-            if getattr(block, 'type', None) == 'text'
-        )
-
+        # 1. fetch — every field we touch on the raw SDK response,
+        # pulled into a named local up front. Same rule as the
+        # factory's config reads.
+        response_model = getattr(raw, 'model', None)
+        raw_content_blocks = getattr(raw, 'content', None) or []
         usage_obj = getattr(raw, 'usage', None)
+
+        # 2. normalize — fall back to the request model when the SDK
+        # omits one, extract per-block fields, decode usage.
+        if not response_model:
+            response_model = model_id
+
+        text_parts = []
+        for block in raw_content_blocks:
+            block_type = getattr(block, 'type', None)
+            block_text = getattr(block, 'text', '') or ''
+            if block_type == 'text':
+                text_parts.append(block_text)
+
         usage = None
         if usage_obj is not None:
             input_tokens = int(getattr(usage_obj, 'input_tokens', 0) or 0)
@@ -126,8 +138,9 @@ class AnthropicConnection(Connection):
                 'total_tokens': input_tokens + output_tokens,
             }
 
+        # 3. use — assemble the public LlmCompletion.
         return LlmCompletion(
-            text=text,
-            model=getattr(raw, 'model', model_id) or model_id,
+            text=''.join(text_parts),
+            model=response_model,
             usage=usage,
         )

@@ -42,18 +42,25 @@ class LlmConnectionConfig:
     """What :class:`LlmConnectionRegistry` stores.
 
     ``provider`` selects which ``*ConnectionFactory`` to build.
-    ``model`` is the chat / completion model id. Vision and embedding
-    models default to the chat model id but can be overridden.
+    ``model`` is the chat / completion model id. ``vision_model``,
+    ``embedding_model``, ``max_tokens``, and ``temperature`` are all
+    required — every factory validates them at construction time and
+    fails fast if any is missing.
 
-    Every backend-specific knob lives here as ``Optional`` and is
-    passed to the matching factory; the factory validates which keys
-    it actually needs (e.g. Bedrock requires ``region``, OpenAI
-    requires ``api_key``).
+    Backend-specific creds (``api_key``, ``region``,
+    ``access_key`` / ``secret_key``, ``base_url`` / ``endpoint_url``,
+    ``organization``) stay ``Optional`` here because not every backend
+    needs every key — the matching factory validates the ones it
+    actually uses.
     """
 
     id: str
     provider: str
     model: str
+    vision_model: str
+    embedding_model: str
+    max_tokens: int
+    temperature: float
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     organization: Optional[str] = None
@@ -61,10 +68,6 @@ class LlmConnectionConfig:
     access_key: Optional[str] = None
     secret_key: Optional[str] = None
     endpoint_url: Optional[str] = None
-    vision_model: Optional[str] = None
-    embedding_model: Optional[str] = None
-    max_tokens: int = 4096
-    temperature: float = 0.0
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def as_factory_config(self) -> Dict[str, Any]:

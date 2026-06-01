@@ -145,9 +145,15 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
 
     def test_openai_forwards_prompt_and_system_unchanged(self):
         fake = MockOpenAIClient()
-        factory = OpenAiConnectionFactory(
-            {'model': 'gpt-x', 'api_key': 'k', 'client': fake}
-        )
+        factory = OpenAiConnectionFactory({
+            'model': 'gpt-x',
+            'vision_model': 'gpt-x',
+            'embedding_model': 'emb',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'k',
+            'client': fake,
+        })
         with factory.get() as conn:
             conn.complete_text(prompt=PREPARED_PROMPT, system=PREPARED_SYSTEM)
         sent = fake.chat_calls[0]['messages']
@@ -156,9 +162,14 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
 
     def test_anthropic_forwards_prompt_and_system_unchanged(self):
         fake = MockAnthropicClient()
-        factory = AnthropicConnectionFactory(
-            {'model': 'claude-x', 'api_key': 'k', 'client': fake}
-        )
+        factory = AnthropicConnectionFactory({
+            'model': 'claude-x',
+            'vision_model': 'claude-x',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'k',
+            'client': fake,
+        })
         with factory.get() as conn:
             conn.complete_text(prompt=PREPARED_PROMPT, system=PREPARED_SYSTEM)
         call = fake.calls[0]
@@ -169,9 +180,15 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
 
     def test_bedrock_forwards_prompt_and_system_unchanged(self):
         fake = MockBedrockClient()
-        factory = BedrockConnectionFactory(
-            {'model_id': 'anthropic.fake', 'region': 'us-east-1', 'client': fake}
-        )
+        factory = BedrockConnectionFactory({
+            'model': 'anthropic.fake',
+            'vision_model': 'anthropic.fake',
+            'embedding_model': 'emb',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'region': 'us-east-1',
+            'client': fake,
+        })
         with factory.get() as conn:
             conn.complete_text(prompt=PREPARED_PROMPT, system=PREPARED_SYSTEM)
         body = fake.calls[0]['body']
@@ -223,6 +240,10 @@ class TestRegistryHasNoPromptSurface(unittest.TestCase):
             id='openai-default',
             provider='openai',
             model='gpt-x',
+            vision_model='gpt-x',
+            embedding_model='emb',
+            max_tokens=4096,
+            temperature=0.0,
             api_key='k',
             extra={'client': fake},
         ))
@@ -262,9 +283,14 @@ class TestRegistryHasNoPromptSurface(unittest.TestCase):
 class TestVisionAndEmbeddingStayInsideLlmCoreLib(unittest.TestCase):
     def test_anthropic_vision_packages_image_bytes_here(self):
         fake = MockAnthropicClient()
-        factory = AnthropicConnectionFactory(
-            {'model': 'claude-x', 'vision_model': 'claude-v', 'client': fake}
-        )
+        factory = AnthropicConnectionFactory({
+            'model': 'claude-x',
+            'vision_model': 'claude-v',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'k',
+            'client': fake,
+        })
         with factory.get() as conn:
             conn.complete_vision(
                 prompt='describe this image',
@@ -287,7 +313,11 @@ class TestVisionAndEmbeddingStayInsideLlmCoreLib(unittest.TestCase):
         fake = MockOpenAIClient(embedding=[1.0, 2.0, 3.0])
         factory = OpenAiConnectionFactory({
             'model': 'gpt-x',
+            'vision_model': 'gpt-x',
             'embedding_model': 'text-embedding-3-small',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'k',
             'client': fake,
         })
         with factory.get() as conn:

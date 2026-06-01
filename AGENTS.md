@@ -1,5 +1,10 @@
 # AGENTS Notes
 
+> This is the canonical home of the fetch → validate → use rule. The
+> workspace-wide pointer lives in `architecture.md` under "Coding
+> conventions (workspace-wide, all Python repos)"; every sibling
+> repo's AGENTS.md points back here.
+
 ## Config reads — always fetch → validate → use, in that order
 
 Any method that reads from `DictConfig` (every `*ConnectionFactory.__init__`
@@ -7,24 +12,53 @@ and every `_build_client`) must be structured as three explicit
 blocks, in this order:
 
 1. **fetch** — pull every value the method needs out of the config
-   into named locals at the top. One `config.get('key')` per value.
-   Required keys are pulled with no fallback (`config.get('key')`);
-   genuinely-optional values with a real default may keep one
-   (`config.get('temperature', 0.0)`).
-2. **validate** — every None / falsy check + `raise LlmConfigError(...)`
-   lives in one contiguous block immediately after the fetch.
+   into named locals at the top. One `config.get('key')` per value,
+   **with no fallback default**. Inline defaults like
+   `config.get('region', 'us-east-1')` are banned — they hide the
+   requirement.
+2. **validate** — every required key gets a None / falsy check
+   followed by `raise LlmConfigError(...)`, in one contiguous block
+   immediately after the fetch. Strings use truthy-check (rejects
+   both `None` and `''`); numerics use `is None` (so `max_tokens=0`
+   stays valid).
 3. **use** — assign to `self.*`, call collaborators, build SDK
    clients. By this point every value is a named local that has
    passed validation.
 
-Add `# 1. fetch` / `# 2. validate` / `# 3. use` markers — they're
-load-bearing for readability and the operator has explicitly accepted
-them. Do **not** call `config.get(...)` from inside the "use" block;
-hoist it up to the fetch block. The pattern applies recursively —
-`_build_client` follows the same internal layout.
+Add `# 1. fetch` / `# 2. validate` / `# 3. use` markers — the
+operator has explicitly accepted them and they double as anchors for
+the next reviewer.
+
+**No aliases. No fallbacks. No silent defaults.** Pick one canonical
+key per value (`model`, not `model` OR `model_id`; `vision_model`,
+not `vision_model_id`). If a value is missing from the config the
+factory must raise `LlmConfigError` — never paper over it with a
+default and never silently fall back to `model_id` or `model` for
+the vision/embedding model. The matching `LlmConnectionConfig`
+dataclass in `types.py` mirrors the requirement: every cross-provider
+field (model, vision_model, embedding_model, max_tokens, temperature)
+is a required positional field with no default.
 
 See `BedrockConnectionFactory`, `AnthropicConnectionFactory`, and
 `OpenAiConnectionFactory` for the canonical shape.
+
+### The same pattern applies to SDK response parsing
+
+Any method that *reads* fields off a raw SDK response object — the
+`_invoke` / `_invoke_chat` methods in the three `*Connection` classes,
+the `_extract_text` helper in `bedrock_connection.py`, the `embed`
+return-shape pick in `bedrock_connection.py` — also follows fetch →
+validate → use. Don't sprinkle `getattr(raw, 'choices', None)`,
+`payload.get('embedding')`, or `getattr(block, 'text', '')` inside
+loops, generator expressions, or final return statements. Pull
+*every* field you'll touch into a named local at the top of the
+method, normalize / decide which shape you got next, then build the
+public `LlmCompletion` (or chosen embedding vector) last.
+
+In a `for ... in raw_content_blocks` loop, fetch the per-iteration
+fields into named locals (`block_type = getattr(block, 'type', None)`,
+`block_text = getattr(block, 'text', '') or ''`) at the top of the
+loop body instead of inlining them in the conditional / append.
 
 ## The connection-factory shape
 

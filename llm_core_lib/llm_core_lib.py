@@ -20,6 +20,7 @@ from omegaconf import DictConfig
 
 from core_lib.core_lib import CoreLib
 
+from llm_core_lib.errors import LlmConfigError
 from llm_core_lib.registry import LlmConnectionRegistry
 from llm_core_lib.types import LlmConnectionConfig
 
@@ -88,17 +89,51 @@ def _connection_from_mapping(entry: Any) -> LlmConnectionConfig:
 
     Pulled out so the same shape works for plain dicts and for Hydra
     ``DictConfig`` items — both support attr-or-item access.
+
+    Every cross-provider field (``id`` / ``provider`` / ``model`` /
+    ``vision_model`` / ``embedding_model`` / ``max_tokens`` /
+    ``temperature``) is required — missing values raise
+    :class:`LlmConfigError` with a clear pointer at config-load time.
+    Backend-specific creds (``api_key`` / ``region`` / ...) stay
+    optional here; the matching factory validates the ones it actually
+    uses.
     """
+    # 1. fetch
+    id_value = _attr_or_item(entry, 'id')
+    provider = _attr_or_item(entry, 'provider')
+    model = _attr_or_item(entry, 'model')
+    vision_model = _attr_or_item(entry, 'vision_model')
+    embedding_model = _attr_or_item(entry, 'embedding_model')
+    max_tokens = _attr_or_item(entry, 'max_tokens')
+    temperature = _attr_or_item(entry, 'temperature')
     extra_raw = _attr_or_item(entry, 'extra') or {}
+
+    # 2. validate
+    for key, value in (
+        ('id', id_value),
+        ('provider', provider),
+        ('model', model),
+        ('vision_model', vision_model),
+        ('embedding_model', embedding_model),
+        ('max_tokens', max_tokens),
+        ('temperature', temperature),
+    ):
+        if value is None or value == '':
+            raise LlmConfigError(f'connection entry missing required {key!r}')
     try:
         extra = dict(extra_raw)
     except (TypeError, ValueError):
         extra = {}
 
+    # 3. use
     return LlmConnectionConfig(
-        id=str(_attr_or_item(entry, 'id') or ''),
-        provider=str(_attr_or_item(entry, 'provider') or ''),
-        model=str(_attr_or_item(entry, 'model') or ''),
+        id=str(id_value),
+        provider=str(provider),
+        model=str(model),
+        vision_model=str(vision_model),
+        embedding_model=str(embedding_model),
+        max_tokens=int(max_tokens),
+        temperature=float(temperature),
         api_key=_optional_str(_attr_or_item(entry, 'api_key')),
         base_url=_optional_str(_attr_or_item(entry, 'base_url')),
         organization=_optional_str(_attr_or_item(entry, 'organization')),
@@ -106,10 +141,6 @@ def _connection_from_mapping(entry: Any) -> LlmConnectionConfig:
         access_key=_optional_str(_attr_or_item(entry, 'access_key')),
         secret_key=_optional_str(_attr_or_item(entry, 'secret_key')),
         endpoint_url=_optional_str(_attr_or_item(entry, 'endpoint_url')),
-        vision_model=_optional_str(_attr_or_item(entry, 'vision_model')),
-        embedding_model=_optional_str(_attr_or_item(entry, 'embedding_model')),
-        max_tokens=int(_attr_or_item(entry, 'max_tokens') or 4096),
-        temperature=float(_attr_or_item(entry, 'temperature') or 0.0),
         extra=extra,
     )
 

@@ -22,9 +22,28 @@ def _ok_openai(_id: str = 'openai-default') -> LlmConnectionConfig:
         id=_id,
         provider='openai',
         model='gpt-4o-mini',
+        vision_model='gpt-4o-mini',
+        embedding_model='text-embedding-3-small',
+        max_tokens=4096,
+        temperature=0.0,
         api_key='sk-test',
         extra={'client': MockOpenAIClient()},
     )
+
+
+def _config(**overrides) -> LlmConnectionConfig:
+    base = {
+        'id': '_',
+        'provider': 'openai',
+        'model': 'gpt-4o-mini',
+        'vision_model': 'gpt-4o-mini',
+        'embedding_model': 'emb',
+        'max_tokens': 4096,
+        'temperature': 0.0,
+        'api_key': 'sk-test',
+    }
+    base.update(overrides)
+    return LlmConnectionConfig(**base)
 
 
 class TestRegistryHappyPath(unittest.TestCase):
@@ -75,14 +94,7 @@ class TestRegistryErrors(unittest.TestCase):
 
     def test_register_without_id_raises_config_error(self):
         with self.assertRaises(LlmConfigError):
-            self.registry.register(
-                LlmConnectionConfig(
-                    id='',
-                    provider='openai',
-                    model='gpt-4o-mini',
-                    api_key='sk-test',
-                )
-            )
+            self.registry.register(_config(id=''))
 
     def test_duplicate_register_raises(self):
         self.registry.register(_ok_openai())
@@ -99,24 +111,14 @@ class TestRegistryErrors(unittest.TestCase):
 
     def test_bad_provider_propagates_invalid_provider(self):
         with self.assertRaises(LlmInvalidProviderError):
-            self.registry.register(
-                LlmConnectionConfig(
-                    id='bad',
-                    provider='cohere',
-                    model='c4',
-                )
-            )
+            self.registry.register(_config(id='bad', provider='cohere'))
 
     def test_bad_provider_config_propagates_config_error(self):
+        # Strip api_key (and the extra client) — factory must reject.
         with self.assertRaises(LlmConfigError):
-            self.registry.register(
-                LlmConnectionConfig(
-                    id='nokey',
-                    provider='openai',
-                    model='gpt-4o-mini',
-                    # no api_key
-                )
-            )
+            self.registry.register(_config(
+                id='nokey', api_key=None,
+            ))
 
 
 if __name__ == '__main__':
