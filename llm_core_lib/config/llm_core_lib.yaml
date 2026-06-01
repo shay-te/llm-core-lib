@@ -1,0 +1,6 @@
+# @package _global_
+core_lib:
+  llm:
+    # `connections` is the list LlmCoreLib hydrates into the registry
+    # at startup. Empty by default — host apps fill it in.
+    connections: []

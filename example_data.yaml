@@ -1,0 +1,21 @@
+# Example operator-facing config slice. Host apps merge this kind of
+# block into their own Hydra config; LlmCoreLib reads
+# `core_lib.llm.connections` (list of LlmConnectionConfig-shaped
+# entries) and pre-registers them on the in-memory registry.
+core_lib:
+  llm:
+    connections:
+      - id: openai-default
+        provider: openai
+        model: gpt-4.1-mini
+        api_key: ${oc.env:OPENAI_API_KEY,}
+
+      - id: anthropic-default
+        provider: anthropic
+        model: claude-3-5-sonnet-latest
+        api_key: ${oc.env:ANTHROPIC_API_KEY,}
+
+      - id: bedrock-prod
+        provider: bedrock
+        model: anthropic.claude-3-5-sonnet-20241022-v2:0
+        region: us-east-1
