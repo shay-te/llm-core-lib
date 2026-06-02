@@ -1,15 +1,12 @@
 """Tests for :func:`llm_core_lib.create_connection_factory`."""
 import unittest
 
-from llm_core_lib import (
-    AnthropicConnectionFactory,
-    BedrockConnectionFactory,
-    LlmConfigError,
-    LlmConnectionConfig,
-    LlmInvalidProviderError,
-    OpenAiConnectionFactory,
-    create_connection_factory,
-)
+from llm_core_lib.connections.anthropic_connection_factory import AnthropicConnectionFactory
+from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
+from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
+from llm_core_lib.errors import LlmConfigError, LlmInvalidProviderError
+from llm_core_lib.factory import create_connection_factory
+from llm_core_lib.types import LlmConnectionConfig
 from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
 from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
 from llm_core_lib.tests.mock.openai_client import MockOpenAIClient

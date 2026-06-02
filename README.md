@@ -8,9 +8,8 @@ an LLM connection once and resolve a normalized
 `core_lib.connection.ConnectionFactory` by id at call time.
 
 The canonical Bedrock connection factory lives in this package, at
-[`llm_core_lib/connections/bedrock_connection_factory.py`](llm_core_lib/connections/bedrock_connection_factory.py)
-(also exported as `llm_core_lib.BedrockConnectionFactory`). The
-matching `OpenAi` and `Anthropic` factories follow the same shape so a
+[`llm_core_lib/connections/bedrock_connection_factory.py`](llm_core_lib/connections/bedrock_connection_factory.py).
+The matching `OpenAi` and `Anthropic` factories follow the same shape so a
 caller who learns one picks up the others unchanged. `library-core-lib`
 imports its Bedrock factory from here.
 
@@ -252,10 +251,8 @@ The cross-provider factory hands you the matching
 
 ```python
 import os
-from llm_core_lib import (
-    LlmConnectionConfig,
-    create_connection_factory,
-)
+from llm_core_lib.factory import create_connection_factory
+from llm_core_lib.types import LlmConnectionConfig
 
 factory = create_connection_factory(LlmConnectionConfig(
     id='_',                       # id is unused outside the registry
@@ -278,7 +275,7 @@ lifecycle control.
 Or build a single backend factory directly:
 
 ```python
-from llm_core_lib import BedrockConnectionFactory
+from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
 
 factory = BedrockConnectionFactory({
     'model_id': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
@@ -295,10 +292,8 @@ with factory.get() as conn:
 
 ```python
 import os
-from llm_core_lib import (
-    LlmConnectionConfig,
-    LlmConnectionRegistry,
-)
+from llm_core_lib.registry import LlmConnectionRegistry
+from llm_core_lib.types import LlmConnectionConfig
 
 registry = LlmConnectionRegistry()
 
@@ -338,7 +333,7 @@ client.
 ## `LlmCoreLib` (Hydra-friendly composition root)
 
 ```python
-from llm_core_lib import LlmCoreLib
+from llm_core_lib.llm_core_lib import LlmCoreLib
 
 # Hydra DictConfig, a plain dict, or a namespace whose nested
 # attribute/item access resolves `core_lib.llm.connections` all work.
@@ -387,9 +382,9 @@ Coverage targets the package modules (`llm_core_lib/*.py`,
 
 ## Sibling repos
 
-`library-core-lib` consumes `llm_core_lib.BedrockConnectionFactory`
-directly (`from llm_core_lib import BedrockConnectionFactory`); the
-local `library_core_lib.connections.bedrock_connection_factory` module
+`library-core-lib` consumes `BedrockConnectionFactory` directly
+(`from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory`);
+the local `library_core_lib.connections.bedrock_connection_factory` module
 has been removed in favor of this one. Other siblings can do the same
 when they need an LLM backend.
 
