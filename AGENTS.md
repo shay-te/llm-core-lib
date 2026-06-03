@@ -100,12 +100,17 @@ from llm_core_lib.connections import BedrockConnectionFactory                   
 from llm_core_lib import BedrockConnectionFactory                                          # ✗ (no root facade)
 ```
 
-## `requirements.txt` is just `core-lib`
+## `requirements.txt` is `core-lib` + `pydantic>=2.0`
 
-Every other dep (`SQLAlchemy`, `alembic`, `omegaconf`, `hydra-core`,
-`boto3`, etc.) comes in transitively through `core-lib`. The three
-LLM SDKs (`openai`, `anthropic`, `boto3`) are declared in
-`extras_require` so consumers opt in:
+`core-lib` carries the framework transitively (`SQLAlchemy`,
+`alembic`, `omegaconf`, `hydra-core`, `boto3`, etc.).
+`pydantic>=2.0` is required directly because
+`llm_core_lib.safety.llm_view.LLMView` is a Pydantic v2 ``BaseModel``
+with ``ConfigDict(extra='forbid', frozen=True)`` — that's the
+allowlist contract the safety choke point depends on, and Pydantic
+v2's ``extra='forbid'`` is what enforces it. The three LLM SDKs
+(`openai`, `anthropic`, `boto3`) are declared in `extras_require`
+so consumers opt in:
 
 ```bash
 pip install 'llm-core-lib[openai]'

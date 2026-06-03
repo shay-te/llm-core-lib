@@ -15,9 +15,13 @@ the four behaviors the gate is responsible for:
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import unittest
-from dataclasses import dataclass
+from http import HTTPStatus
+
+from core_lib.error_handling.status_code_exception import StatusCodeException
 
 from llm_core_lib.safety.llm_view import LLMView
 from llm_core_lib.safety.payload_gate import (
@@ -26,10 +30,29 @@ from llm_core_lib.safety.payload_gate import (
     sanitized_error_payload,
     to_llm_payload,
 )
-from llm_core_lib.safety.pii_scanner import assert_no_pii
 
 
-@dataclass(frozen=True)
+# Inline PII assertions so ``llm-core-lib`` stays free of regex-PII
+# concerns (the canonical patterns live in ``agent-core-lib``
+# ``helpers/pii_patterns`` per the workspace's single-source-of-truth
+# rule). What this file cares about is the *contract* — exception
+# messages must not survive into the LLM-bound payload. The simple
+# ``@`` / dash-digit checks below are sufficient for that contract:
+# the inputs we feed in carry an email and an SSN respectively, and
+# the assertion is that neither leaks back out.
+def _payload_text(payload):
+    return json.dumps(payload, default=str)
+
+
+def _assert_no_email_or_ssn(test_case, payload):
+    blob = _payload_text(payload)
+    test_case.assertNotIn('@', blob, f'email-shaped data leaked: {blob!r}')
+    test_case.assertIsNone(
+        re.search(r'\d{3}-\d{2}-\d{4}', blob),
+        f'ssn-shaped data leaked: {blob!r}',
+    )
+
+
 class _UserLLMView(LLMView):
     id: str
     display_name: str
@@ -87,7 +110,7 @@ class TestRunToolSuccessPath(unittest.TestCase):
         payload = run_tool(search_users, 'jane')
         self.assertEqual(payload, [{'id': 'u1', 'display_name': 'Jane'}])
         # And it's PII-free by construction — the view didn't declare email.
-        assert_no_pii(payload)
+        _assert_no_email_or_ssn(self, payload)
 
 
 class TestRunToolErrorPath(unittest.TestCase):
@@ -111,7 +134,7 @@ class TestRunToolErrorPath(unittest.TestCase):
         self.assertNotIn('jane@example.com', payload['detail'])
         self.assertNotIn('EU-WEST', payload['detail'])
         # And the assert holds for the entire payload, not just detail.
-        assert_no_pii(payload)
+        _assert_no_email_or_ssn(self, payload)
 
     def test_error_payload_is_assert_no_pii_safe(self):
         def banned_user_tool():
@@ -123,7 +146,7 @@ class TestRunToolErrorPath(unittest.TestCase):
         with self.assertLogs(logger, level='ERROR'):
             payload = run_tool(banned_user_tool, logger=logger)
 
-        assert_no_pii(payload)
+        _assert_no_email_or_ssn(self, payload)
         self.assertEqual(payload['status'], 'error')
 
     def test_unsafe_tool_result_failure_is_also_sanitized(self):
@@ -138,7 +161,7 @@ class TestRunToolErrorPath(unittest.TestCase):
         with self.assertLogs(logger, level='ERROR'):
             payload = run_tool(leaky_tool, logger=logger)
 
-        assert_no_pii(payload)
+        _assert_no_email_or_ssn(self, payload)
         self.assertEqual(payload['status'], 'error')
 
     def test_correlation_ref_is_stable_length(self):
@@ -150,6 +173,26 @@ class TestRunToolErrorPath(unittest.TestCase):
             payload = run_tool(failing_tool, logger=logger)
         # 8-char hex slice from uuid4 — locks the operator-facing format.
         self.assertEqual(len(payload['ref']), 8)
+
+
+class TestUnsafeToolResultErrorIsStatusCodeException(unittest.TestCase):
+    """The framework convention is that every core-lib exception
+    inherits from ``core_lib.StatusCodeException`` so the Flask layer's
+    ``@HandleException`` decorator can map it to an HTTP response. Lock
+    the inheritance and the chosen status code."""
+
+    def test_subclass_of_status_code_exception(self):
+        self.assertTrue(issubclass(UnsafeToolResultError, StatusCodeException))
+
+    def test_http_status_is_internal_server_error(self):
+        # 500 because this is a server-side contract violation by a
+        # tool author — no client action would fix it.
+        err = UnsafeToolResultError('a tool returned a raw dict')
+        # ``StatusCodeException`` exposes the chosen status via
+        # ``.status_code``; tolerate both ``HTTPStatus`` and ``int``
+        # forms since the constructor accepts either.
+        status = getattr(err, 'status_code', None)
+        self.assertIn(status, (HTTPStatus.INTERNAL_SERVER_ERROR, 500))
 
 
 class TestSanitizedErrorPayload(unittest.TestCase):

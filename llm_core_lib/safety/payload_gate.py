@@ -21,12 +21,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from http import HTTPStatus
 from typing import Any, Callable, Optional
+
+from core_lib.error_handling.status_code_exception import StatusCodeException
 
 from llm_core_lib.safety.llm_view import LLMView
 
 
-class UnsafeToolResultError(TypeError):
+class UnsafeToolResultError(StatusCodeException):
     """A tool tried to return a non-:class:`LLMView` shape to the LLM.
 
     Failing loud is the contract — the model must never see something
@@ -34,7 +37,21 @@ class UnsafeToolResultError(TypeError):
     raw dict / ORM row / SQLAlchemy model reaching this point is a bug
     in the tool, not something to paper over with a best-effort
     coercion.
+
+    HTTP status: **500 INTERNAL SERVER ERROR**. The cause is a
+    server-side contract violation by a tool author (returning a shape
+    the safety gate refuses) — there is no client action that would
+    make the request succeed, and surfacing it as a 4xx would let the
+    bug hide as "client problem" in monitoring. The web layer's
+    ``@HandleException`` decorator picks the status code off this
+    exception and turns it into the matching HTTP response; the chat
+    loop's ``run_tool`` separately catches it and returns the generic,
+    PII-free error envelope to the LLM (so the type-name detail in
+    the message never reaches the model either).
     """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(HTTPStatus.INTERNAL_SERVER_ERROR, message)
 
 
 def _ensure_llm_view(item: Any) -> None:
@@ -61,12 +78,22 @@ def to_llm_payload(result: Any) -> Any:
     if isinstance(result, list):
         for item in result:
             _ensure_llm_view(item)
-        return [item.to_dict() for item in result]
+        return [item.model_dump() for item in result]
     _ensure_llm_view(result)
-    return result.to_dict()
+    return result.model_dump()
 
 
-def _new_error_ref() -> str:
+def new_error_ref() -> str:
+    """Mint a fresh correlation ref for an LLM tool failure.
+
+    Returns an 8-char hex slice from ``uuid4`` — the operator-facing
+    format that ``sanitized_error_payload`` puts in the ``ref`` field
+    and that ``self.logger.exception('... [ref=%s] ...', ref)`` writes
+    to the log line. **Use this instead of inlining
+    ``uuid.uuid4().hex[:8]``** anywhere you're about to build a
+    sanitized error envelope — one definition of the ref format means
+    one place to change if the length / encoding ever shifts.
+    """
     return uuid.uuid4().hex[:8]
 
 
@@ -113,7 +140,7 @@ def run_tool(
         # type-name detail the gate's message carries.
         return to_llm_payload(result)
     except Exception:  # noqa: BLE001 — sanitized error path; full detail goes to the log
-        ref = _new_error_ref()
+        ref = new_error_ref()
         log.exception(
             'llm tool %s failed [ref=%s]',
             getattr(fn, '__name__', repr(fn)),
