@@ -1,12 +1,9 @@
 """Tests for the :class:`llm_core_lib.LlmCoreLib` composition root."""
 import unittest
 
-from llm_core_lib import (
-    LlmConfigError,
-    LlmCoreLib,
-    LlmInvalidProviderError,
-    OpenAiConnectionFactory,
-)
+from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
+from llm_core_lib.errors import LlmConfigError, LlmInvalidProviderError
+from llm_core_lib.llm_core_lib import LlmCoreLib
 
 
 class TestLlmCoreLibBootstrap(unittest.TestCase):

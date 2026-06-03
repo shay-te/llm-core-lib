@@ -5,17 +5,14 @@ touches the network and none of the real SDKs need to be installed.
 """
 import unittest
 
-from llm_core_lib import (
-    AnthropicConnection,
-    AnthropicConnectionFactory,
-    BedrockConnection,
-    BedrockConnectionFactory,
-    LlmCompletion,
-    LlmConfigError,
-    LlmProviderError,
-    OpenAiConnection,
-    OpenAiConnectionFactory,
-)
+from llm_core_lib.connections.anthropic_connection import AnthropicConnection
+from llm_core_lib.connections.anthropic_connection_factory import AnthropicConnectionFactory
+from llm_core_lib.connections.bedrock_connection import BedrockConnection
+from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
+from llm_core_lib.connections.openai_connection import OpenAiConnection
+from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
+from llm_core_lib.errors import LlmConfigError, LlmProviderError
+from llm_core_lib.types import LlmCompletion
 from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
 from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
 from llm_core_lib.tests.mock.openai_client import MockOpenAIClient

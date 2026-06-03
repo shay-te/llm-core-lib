@@ -86,22 +86,19 @@ separate per-call helpers if/when needed, not in a parallel API.
 
 ## No empty / re-export-only `__init__.py`
 
-Same rule as the sibling repos: do **not** create `__init__.py` files
-whose only content is `from .x import Y` aggregators. Either leave
-the `__init__.py` empty (Python package marker) or — only for the
-package-root `llm_core_lib/__init__.py` — list *intentional* public
-exports.
+Same rule as the sibling core libs: `__init__.py` files carry **no**
+imports. Every `__init__.py` is empty (Python package marker); the
+package-root `llm_core_lib/__init__.py` holds only `__version__`. There
+is no re-export facade.
 
-In-tree code imports from the defining submodule:
+In-tree code — and external consumers — import from the defining
+submodule:
 
 ```python
 from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory   # ✓
 from llm_core_lib.connections import BedrockConnectionFactory                              # ✗
+from llm_core_lib import BedrockConnectionFactory                                          # ✗ (no root facade)
 ```
-
-The package-root `__init__.py` re-exports for user convenience
-(`from llm_core_lib import BedrockConnectionFactory`); that's the
-documented exception.
 
 ## `requirements.txt` is just `core-lib`
 

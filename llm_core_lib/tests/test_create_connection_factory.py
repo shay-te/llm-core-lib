@@ -1,15 +1,12 @@
 """Tests for :func:`llm_core_lib.create_connection_factory`."""
 import unittest
 
-from llm_core_lib import (
-    AnthropicConnectionFactory,
-    BedrockConnectionFactory,
-    LlmConfigError,
-    LlmConnectionConfig,
-    LlmInvalidProviderError,
-    OpenAiConnectionFactory,
-    create_connection_factory,
-)
+from llm_core_lib.connections.anthropic_connection_factory import AnthropicConnectionFactory
+from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
+from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
+from llm_core_lib.errors import LlmConfigError, LlmInvalidProviderError
+from llm_core_lib.factory import create_connection_factory
+from llm_core_lib.types import LlmConnectionConfig
 from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
 from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
 from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
@@ -68,6 +65,35 @@ class TestCreateConnectionFactoryHappyPath(unittest.TestCase):
             api_key='sk-test', extra={'client': MockOpenAIClient()},
         ))
         self.assertIsInstance(factory, OpenAiConnectionFactory)
+
+
+class TestRawClientExposesInjectedClient(unittest.TestCase):
+    """`raw_client()` returns the same shared SDK client `get()` wraps —
+    the escape hatch host apps use for provider-native tool-calling."""
+
+    def test_openai_raw_client_is_injected_client(self):
+        client = MockOpenAIClient()
+        factory = create_connection_factory(_full(
+            'openai', model='gpt-4o-mini', vision_model='gpt-4o-mini',
+            api_key='sk-test', extra={'client': client},
+        ))
+        self.assertIs(factory.raw_client(), client)
+
+    def test_anthropic_raw_client_is_injected_client(self):
+        client = MockAnthropicClient()
+        factory = create_connection_factory(_full(
+            'anthropic', model='claude-x', vision_model='claude-x',
+            api_key='sk-test', extra={'client': client},
+        ))
+        self.assertIs(factory.raw_client(), client)
+
+    def test_bedrock_raw_client_is_injected_client(self):
+        client = MockBedrockClient()
+        factory = create_connection_factory(_full(
+            'bedrock', model='anthropic.claude-x', vision_model='anthropic.claude-x',
+            region='us-east-1', extra={'client': client},
+        ))
+        self.assertIs(factory.raw_client(), client)
 
 
 class TestCreateConnectionFactoryRejects(unittest.TestCase):

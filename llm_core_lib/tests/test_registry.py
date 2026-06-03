@@ -3,15 +3,10 @@ import unittest
 
 from core_lib.connection.connection_factory import ConnectionFactory
 
-from llm_core_lib import (
-    LlmConfigError,
-    LlmConnectionConfig,
-    LlmConnectionRegistry,
-    LlmDuplicateConnectionError,
-    LlmInvalidProviderError,
-    LlmMissingConnectionError,
-    OpenAiConnectionFactory,
-)
+from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
+from llm_core_lib.errors import LlmConfigError, LlmDuplicateConnectionError, LlmInvalidProviderError, LlmMissingConnectionError
+from llm_core_lib.registry import LlmConnectionRegistry
+from llm_core_lib.types import LlmConnectionConfig
 from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
 
 

@@ -29,13 +29,11 @@ import unittest
 from typing import Iterable, Set
 
 import llm_core_lib
-from llm_core_lib import (
-    AnthropicConnectionFactory,
-    BedrockConnectionFactory,
-    LlmConnectionConfig,
-    LlmConnectionRegistry,
-    OpenAiConnectionFactory,
-)
+from llm_core_lib.connections.anthropic_connection_factory import AnthropicConnectionFactory
+from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
+from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
+from llm_core_lib.registry import LlmConnectionRegistry
+from llm_core_lib.types import LlmConnectionConfig
 from llm_core_lib.registry import LlmConnectionRegistry as _RegistryClass
 from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
 from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
@@ -203,11 +201,9 @@ class TestCallerPreparedPromptForwardsVerbatim(unittest.TestCase):
         # ``llm-core-lib`` must not grow a ``build_prompt`` /
         # ``with_system`` / ``prepend_*`` helper — those are explicitly
         # agent-core-lib's job. Probe every public connection class.
-        from llm_core_lib import (
-            AnthropicConnection,
-            BedrockConnection,
-            OpenAiConnection,
-        )
+        from llm_core_lib.connections.anthropic_connection import AnthropicConnection
+        from llm_core_lib.connections.bedrock_connection import BedrockConnection
+        from llm_core_lib.connections.openai_connection import OpenAiConnection
 
         forbidden_method_substrings = (
             'build_prompt', 'prepare_prompt', 'compose_prompt',
@@ -331,7 +327,8 @@ class TestVisionAndEmbeddingStayInsideLlmCoreLib(unittest.TestCase):
     def test_embed_signature_takes_only_text(self):
         import inspect
 
-        from llm_core_lib import BedrockConnection, OpenAiConnection
+        from llm_core_lib.connections.bedrock_connection import BedrockConnection
+        from llm_core_lib.connections.openai_connection import OpenAiConnection
 
         for cls in (OpenAiConnection, BedrockConnection):
             sig = inspect.signature(cls.embed)
