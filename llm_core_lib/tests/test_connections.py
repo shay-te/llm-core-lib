@@ -222,6 +222,29 @@ class TestOpenAiConnection(unittest.TestCase):
         completion = factory.get().complete_text('hi')
         self.assertEqual(completion.text, '')
 
+    def test_embed_requires_embedding_model_configured(self):
+        # The factory's own validation already rejects an empty
+        # ``embedding_model`` at construction; we exercise the
+        # connection-level guard directly here (the factory layer's
+        # rejection is tested in test_create_connection_factory.py).
+        connection = OpenAiConnection(
+            client=MockOpenAIClient(),
+            model_id='gpt-x',
+            vision_model_id='gpt-x',
+            embedding_model='',  # empty by direct construction
+        )
+        with self.assertRaises(LlmConfigError):
+            connection.embed('hello')
+
+    def test_response_model_falls_back_to_request_model(self):
+        # SDK omits ``model`` on the response — we fall back to the
+        # model we sent in the request rather than returning ``None``.
+        factory, _ = self._factory(
+            client=MockOpenAIClient(content='hi', model=None),
+        )
+        completion = factory.get().complete_text('hi')
+        self.assertEqual(completion.model, 'gpt-x')
+
 
 # ---- Anthropic --------------------------------------------------------
 
@@ -250,6 +273,15 @@ class TestAnthropicConnection(unittest.TestCase):
         self.assertEqual(completion.usage['prompt_tokens'], 11)
         self.assertEqual(completion.usage['completion_tokens'], 4)
         self.assertEqual(completion.usage['total_tokens'], 15)
+
+    def test_response_model_falls_back_to_request_model(self):
+        # Same shape as the OpenAI fallback: if the SDK omits ``model``
+        # on the response, we use the model we sent in the request.
+        factory, _ = self._factory(
+            client=MockAnthropicClient(content='hi', model=None),
+        )
+        completion = factory.get().complete_text('hello')
+        self.assertEqual(completion.model, 'claude-x')
 
     def test_complete_text_sends_user_content_block(self):
         factory, fake = self._factory()
@@ -531,6 +563,81 @@ class TestBedrockConnection(unittest.TestCase):
         # Defensive — a malformed payload (e.g. a list at the top
         # level) returns empty text rather than crashing the call.
         self.assertEqual(_extract_text(['unexpected']), '')
+
+    def test_property_accessors_return_configured_values(self):
+        # ``model_id`` / ``vision_model_id`` / ``embedding_model`` are
+        # the three read-only accessors callers reach for when they
+        # need to know which model a connection is bound to.
+        factory, _ = self._factory(
+            vision_model='anthropic.claude-3-haiku-20240307-v1:0',
+            embedding_model='amazon.titan-embed-text-v1',
+        )
+        connection = factory.get()
+        self.assertEqual(
+            connection.model_id,
+            'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        )
+        self.assertEqual(
+            connection.vision_model_id,
+            'anthropic.claude-3-haiku-20240307-v1:0',
+        )
+        self.assertEqual(
+            connection.embedding_model,
+            'amazon.titan-embed-text-v1',
+        )
+
+    def test_embed_requires_embedding_model_configured(self):
+        # Factory rejects an empty ``embedding_model`` at construction;
+        # we exercise the connection-level guard directly. Mirrors the
+        # OpenAI adapter's behavior.
+        connection = BedrockConnection(
+            client=MockBedrockClient(),
+            model_id='anthropic.claude',
+            vision_model_id='anthropic.claude',
+            embedding_model='',
+        )
+        with self.assertRaises(LlmConfigError):
+            connection.embed('hello')
+
+    def test_embed_returns_empty_list_when_response_has_no_shape(self):
+        # Neither ``embedding`` nor ``embeddings`` populated in the
+        # response payload — the fall-through branch returns ``[]``
+        # rather than raising. Locks the third "decide which shape"
+        # branch.
+        class _EmptyBedrockClient(object):
+            def invoke_model(self, **kwargs):
+                import json
+
+                class _Body(object):
+                    def read(_self):
+                        return json.dumps({}).encode('utf-8')
+
+                return {'body': _Body()}
+
+        factory, _ = self._factory(client=_EmptyBedrockClient())
+        self.assertEqual(factory.get().embed('hello'), [])
+
+    def test_extract_text_returns_empty_for_unrecognised_shape(self):
+        from llm_core_lib.connections.bedrock_connection import _extract_text
+        # A payload that's a dict but carries no ``content`` /
+        # ``completion`` / ``results`` keys — the final fall-through
+        # returns ``''``.
+        self.assertEqual(_extract_text({'random': 'shape'}), '')
+
+    def test_extract_text_skips_non_dict_items_in_content_blocks(self):
+        from llm_core_lib.connections.bedrock_connection import _extract_text
+        # ``content`` is a list, but one of its items isn't a dict — the
+        # per-item ``isinstance`` guard must skip it without breaking
+        # the loop. Locks the inner ``False``-branch of the per-block
+        # ``isinstance(part, dict)`` check.
+        payload = {
+            'content': [
+                {'type': 'text', 'text': 'first'},
+                'not a dict — must be skipped',
+                {'type': 'text', 'text': 'second'},
+            ],
+        }
+        self.assertEqual(_extract_text(payload), 'firstsecond')
 
 
 # ---- Context-manager protocol ----------------------------------------

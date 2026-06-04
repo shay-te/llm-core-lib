@@ -137,6 +137,26 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
         core = LlmCoreLib({'core_lib': {'llm': {'connections': 12345}}})
         self.assertEqual(core.registry.list(), [])
 
+    def test_connection_from_mapping_missing_required_field_raises(self):
+        # The validation block in ``_connection_from_mapping`` checks
+        # every required field (model / vision_model / embedding_model
+        # / max_tokens / temperature) and raises ``LlmConfigError`` if
+        # any is missing or empty. Locks the per-key error path.
+        from llm_core_lib.llm_core_lib import _connection_from_mapping
+        entry = {
+            'id': 'x',
+            'provider': 'openai',
+            # model intentionally missing
+            'vision_model': 'm',
+            'embedding_model': 'emb',
+            'max_tokens': 4096,
+            'temperature': 0.0,
+            'api_key': 'sk-x',
+        }
+        with self.assertRaises(LlmConfigError) as ctx:
+            _connection_from_mapping(entry)
+        self.assertIn("'model'", str(ctx.exception))
+
     def test_connection_from_mapping_with_bad_extra_falls_back_to_empty(self):
         # ``extra`` that isn't dict-coercible silently becomes {} on
         # the resulting LlmConnectionConfig. Tested at the helper

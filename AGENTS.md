@@ -100,17 +100,22 @@ from llm_core_lib.connections import BedrockConnectionFactory                   
 from llm_core_lib import BedrockConnectionFactory                                          # ✗ (no root facade)
 ```
 
-## `requirements.txt` is `core-lib` + `pydantic>=2.0`
+## `requirements.txt` is just `core-lib`
 
 `core-lib` carries the framework transitively (`SQLAlchemy`,
-`alembic`, `omegaconf`, `hydra-core`, `boto3`, etc.).
-`pydantic>=2.0` is required directly because
-`llm_core_lib.safety.llm_view.LLMView` is a Pydantic v2 ``BaseModel``
-with ``ConfigDict(extra='forbid', frozen=True)`` — that's the
-allowlist contract the safety choke point depends on, and Pydantic
-v2's ``extra='forbid'`` is what enforces it. The three LLM SDKs
-(`openai`, `anthropic`, `boto3`) are declared in `extras_require`
-so consumers opt in:
+`alembic`, `omegaconf`, `hydra-core`, `boto3`, etc.). **No other
+runtime dependency lives here** — in particular this repo does NOT
+depend on Pydantic. The transport-layer ``LLMView`` marker in
+``llm_core_lib.safety.llm_view`` is a plain Python class (no Pydantic
+import); the Pydantic-backed concrete view with
+``ConfigDict(extra='forbid', frozen=True)`` is in
+``agent_core_lib.safety.llm_view`` and that's where the Pydantic
+dependency lives. The split keeps this repo a pure transport library
+and respects the boundary test (``test_boundary.py``) that forbids
+``agent_core_lib`` imports from this side.
+
+The three LLM SDKs (`openai`, `anthropic`, `boto3`) are declared in
+`extras_require` so consumers opt in:
 
 ```bash
 pip install 'llm-core-lib[openai]'

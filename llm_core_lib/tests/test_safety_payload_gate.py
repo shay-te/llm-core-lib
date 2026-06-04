@@ -54,8 +54,19 @@ def _assert_no_email_or_ssn(test_case, payload):
 
 
 class _UserLLMView(LLMView):
-    id: str
-    display_name: str
+    """Stdlib subclass of the transport-layer marker — the gate's
+    ``isinstance(item, LLMView)`` check passes, and ``model_dump``
+    returns a JSON-safe dict. The Pydantic-flavored equivalent
+    (``ConfigDict(extra='forbid', frozen=True)`` + field declarations)
+    lives in ``agent_core_lib.safety.llm_view.LLMView`` and is tested
+    there; this fixture only needs to exercise the gate's contract."""
+
+    def __init__(self, id, display_name):
+        self.id = id
+        self.display_name = display_name
+
+    def model_dump(self):
+        return {'id': self.id, 'display_name': self.display_name}
 
 
 class TestToLlmPayloadAcceptsLLMView(unittest.TestCase):

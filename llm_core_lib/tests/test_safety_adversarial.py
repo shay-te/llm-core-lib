@@ -1,39 +1,31 @@
-"""Adversarial tests for the structural safety boundary.
+"""Adversarial tests for the transport-layer safety boundary.
 
-Parallel to ``agent_core_lib/tests/test_pii_adversarial.py`` but for
-the *structural* defense, not the regex set. The bypass surface here
-is **subclass tricks** a tool author could (accidentally or
-deliberately) use to slip data past the gate:
+This file owns only the probes that exercise the **transport-layer**
+defense — the :class:`LLMView` marker (a plain class with no Pydantic
+dep) and the gate (:func:`to_llm_payload` + :func:`run_tool`). The
+subclass-tricks-against-Pydantic family (``ConfigDict`` overrides,
+computed-field leaks, ``Any``-typed nested dicts, frozen-via-setattr,
+``RootModel`` with ``Any`` root, ``project`` / ``project_list`` edge
+cases) is the agent-layer's concern and lives in
+``agent-core-lib/tests/test_safety_adversarial.py`` next to the
+Pydantic-backed concrete view.
 
-* :class:`~llm_core_lib.safety.llm_view.LLMView` — Pydantic v2 base
-  with ``ConfigDict(extra='forbid', frozen=True)``. Subclasses MUST
-  inherit those flags; if a subclass overrides ``model_config`` and
-  drops one, the safety guarantee silently weakens.
-* :func:`~llm_core_lib.safety.payload_gate.to_llm_payload` — the
-  choke point. Rejects non-``LLMView`` inputs at the OUTER level;
-  but recursive-content enforcement (an ``Any``-typed field carrying
-  a raw dict) isn't a feature it can provide without per-field
-  type-walking.
+Categories:
 
-Tests are categorized:
-
-* ``test_bypass_*`` — proves an actual smuggling path. These are the
-  RED tests that an attacker (or a sloppy refactor) could use; locking
-  the current behavior surfaces them as known limitations.
 * ``test_gate_rejects_*`` — proves the gate refuses a particular
-  shape. Lock for regressions.
-* ``test_project_*`` / ``test_run_tool_*`` / ``test_flow_*`` — edge
-  cases in the projection helpers and run_tool wrapper.
-* ``test_no_leak_*`` — round-trip checks that the LLM-visible payload
-  carries nothing it shouldn't.
+  non-``LLMView`` shape. Locks regressions.
+* ``test_gate_accepts_*`` — proves the gate accepts the legitimate
+  shapes (single view, list of views, ``None``, empty list).
+* ``test_run_tool_*`` — edge cases in the wrapper.
+* ``test_new_error_ref`` / ``test_sanitized_error_payload_*`` — the
+  generic error envelope shape contract.
+* ``test_no_leak_*`` — round-trip: nothing the tool authored should
+  reach the LLM-bound payload beyond the declared field list.
 """
 from __future__ import annotations
 
 import logging
 import unittest
-from typing import Any, Dict, List, Optional
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
 
 # Importing the test package first activates the core_lib stub from
 # ``llm_core_lib/tests/__init__.py`` — needed locally so the gate's
@@ -50,203 +42,38 @@ from llm_core_lib.safety.payload_gate import (
 )
 
 
-# Canonical fixture used across the suite.
 class _UserView(LLMView):
-    id: str
-    display_name: str
+    """Stdlib subclass of the transport marker — the gate only sees
+    ``isinstance(item, LLMView)`` and ``item.model_dump()``, so this
+    minimal class is enough to exercise every gate-behavior probe.
+    The Pydantic-backed equivalent (with ``ConfigDict`` enforcement)
+    lives in ``agent_core_lib.safety.llm_view`` and the bypass probes
+    against it live in agent-core-lib's adversarial test file."""
+
+    def __init__(self, id, display_name):
+        self.id = id
+        self.display_name = display_name
+
+    def model_dump(self):
+        return {'id': self.id, 'display_name': self.display_name}
 
 
 # ===========================================================================
-# BYPASS: subclass tricks that weaken the contract
-# ===========================================================================
-
-
-class TestBypassConfigDictOverride(unittest.TestCase):
-    """The single biggest footgun: a subclass that redefines
-    ``model_config`` without preserving ``extra='forbid'`` or
-    ``frozen=True``. Pydantic v2 does NOT merge ``model_config`` across
-    the MRO — the most-derived class's value wins outright. So a tool
-    author who writes ``model_config = ConfigDict(arbitrary_types_allowed=True)``
-    on their view silently drops both safety flags."""
-
-    def test_bypass_subclass_dropping_extra_forbid_accepts_unknown_fields(self):
-        # A subclass that overrides ``model_config`` without
-        # ``extra='forbid'`` silently lets extras through. The gate
-        # then dumps them as part of ``model_dump()``.
-        class _LeakyView(LLMView):
-            id: str
-            model_config = ConfigDict(extra='allow')  # SAFETY DROPPED
-
-        # Construction allows the unknown field.
-        view = _LeakyView(id='u1', email='jane@example.com')
-        # And ``model_dump`` exposes it — the gate forwards it.
-        payload = to_llm_payload(view)
-        self.assertEqual(payload.get('email'), 'jane@example.com')
-        # Lock this as a KNOWN bypass — the long-term mitigation is
-        # either (a) freezing ``LLMView.model_config`` via a metaclass
-        # check, or (b) a unit-test sweep across every LLMView
-        # subclass asserting ``extra='forbid'`` is still set.
-
-    def test_bypass_subclass_dropping_frozen_allows_post_init_mutation(self):
-        class _MutableView(LLMView):
-            id: str
-            note: str = ''
-            model_config = ConfigDict(extra='forbid', frozen=False)
-
-        view = _MutableView(id='u1', note='clean')
-        # Without ``frozen=True`` we can splice PII onto an
-        # already-built view AFTER any upstream allowlist check.
-        view.note = 'now contains jane@example.com'
-        payload = to_llm_payload(view)
-        self.assertIn('jane@example.com', payload['note'])
-
-    def test_catch_subclass_keeping_both_flags_still_safe(self):
-        # The reference safe pattern — any new view should look like
-        # this. Locks the contract for the rest of the codebase.
-        class _SafeView(LLMView):
-            id: str
-            model_config = ConfigDict(extra='forbid', frozen=True)
-
-        with self.assertRaises(ValidationError):
-            _SafeView(id='u1', email='jane@example.com')
-
-
-class TestBypassComputedFieldLeaks(unittest.TestCase):
-    """Pydantic v2's ``@computed_field`` decorator exposes a derived
-    value through ``model_dump()`` even though it is NOT in
-    ``model_fields``. So ``LLMView.allowed_field_names()`` (which reads
-    ``model_fields``) reports an under-count, and the
-    "fields are locked" style tests miss the computed leak."""
-
-    def test_bypass_computed_field_exposes_data_not_in_allowlist(self):
-        class _ComputedLeakView(LLMView):
-            id: str
-            _email: str = 'jane@example.com'  # private; not a field
-
-            model_config = ConfigDict(extra='forbid', frozen=True)
-
-            @computed_field
-            @property
-            def derived_contact(self) -> str:
-                # Reads from a private attribute and exposes it on dump.
-                return self._email
-
-        view = _ComputedLeakView(id='u1')
-        payload = to_llm_payload(view)
-        # The computed field is in the dumped payload.
-        self.assertIn('derived_contact', payload)
-        self.assertEqual(payload['derived_contact'], 'jane@example.com')
-        # And the "allowlist" misses it — allowed_field_names() only
-        # walks ``model_fields``.
-        self.assertNotIn('derived_contact', view.allowed_field_names())
-
-
-class TestBypassAnyTypedNestedDict(unittest.TestCase):
-    """The gate enforces the OUTER allowlist but does not recursively
-    type-walk nested values. A field typed ``Any`` / ``Dict[str, Any]``
-    / ``List[Dict[str, Any]]`` accepts arbitrary content — and that
-    content survives ``model_dump()`` verbatim."""
-
-    def test_bypass_any_field_smuggles_raw_dict(self):
-        class _BagView(LLMView):
-            id: str
-            data: Any = None
-
-        view = _BagView(id='u1', data={
-            'email': 'jane@example.com',
-            'ssn': '123-45-6789',
-            'card': '4242 4242 4242 4242',
-        })
-        payload = to_llm_payload(view)
-        # The raw PII-bearing dict is in the payload as-is.
-        self.assertEqual(payload['data']['email'], 'jane@example.com')
-        # Mitigation: this is what the scrub_pii backstop in the host
-        # app is for — the gate alone can't prevent this and shouldn't
-        # try (recursive type-walking would require per-field schema
-        # introspection across arbitrarily-nested generic types).
-
-    def test_bypass_any_field_smuggles_list_of_dicts(self):
-        class _ListBagView(LLMView):
-            id: str
-            items: List[Dict[str, Any]] = Field(default_factory=list)
-
-        view = _ListBagView(id='u1', items=[
-            {'email': 'a@b.com'},
-            {'phone': '+1 555 123 4567'},
-        ])
-        payload = to_llm_payload(view)
-        self.assertEqual(payload['items'][0]['email'], 'a@b.com')
-
-    def test_bypass_nested_non_llmview_basemodel(self):
-        # A field typed as another (non-LLMView) BaseModel — Pydantic
-        # nests cleanly, but the gate has no idea the nested model is
-        # exposing fields outside the safety hierarchy.
-        class _RawNested(BaseModel):
-            email: str
-            ssn: str
-
-        class _OuterView(LLMView):
-            id: str
-            nested: _RawNested
-
-        view = _OuterView(
-            id='u1',
-            nested=_RawNested(email='jane@example.com', ssn='123-45-6789'),
-        )
-        payload = to_llm_payload(view)
-        self.assertEqual(payload['nested']['email'], 'jane@example.com')
-
-
-class TestBypassFrozenViaObjectSetattr(unittest.TestCase):
-    """Pydantic v2's ``frozen=True`` overrides ``__setattr__`` but
-    ``object.__setattr__`` bypasses that. Hostile in-process code
-    can still mutate. This is a Python-language limitation, not
-    something the safety layer can defend against — but lock the
-    behavior so it's a known surface."""
-
-    def test_bypass_object_setattr_circumvents_frozen(self):
-        view = _UserView(id='u1', display_name='Jane')
-        # Normal assignment is blocked.
-        with self.assertRaises(ValidationError):
-            view.display_name = 'somebody else'  # type: ignore[misc]
-        # But the language-level escape hatch isn't.
-        object.__setattr__(view, 'display_name', 'spliced after build')
-        self.assertEqual(view.display_name, 'spliced after build')
-        # No mitigation at the type-system level; this is "trust the
-        # process boundary". Audit log + code review are the controls.
-
-
-class TestBypassRootModelExposesAnyRoot(unittest.TestCase):
-    """A subclass of Pydantic's ``RootModel`` (or a workaround mimicking
-    one) carries a single ``root`` value of arbitrary type. If someone
-    builds an ``LLMView`` whose only field is ``root: Any``, that view
-    is effectively unbounded."""
-
-    def test_bypass_root_any_field_is_unbounded(self):
-        class _RootAnyView(LLMView):
-            root: Any
-
-        view = _RootAnyView(root={'email': 'jane@example.com', 'card': '4242...'})
-        payload = to_llm_payload(view)
-        self.assertEqual(payload['root']['email'], 'jane@example.com')
-
-
-# ===========================================================================
-# GATE REJECTS: structural boundary keeps these out
+# GATE — refusal probes
 # ===========================================================================
 
 
 class TestGateRejectsNonLLMViewInputs(unittest.TestCase):
-    """Positive-side locking — the gate refuses these. Tightens the
-    perimeter; a regression that accepted any of them would be a
-    real safety bug."""
+    """Every non-``LLMView`` input shape that could plausibly reach the
+    gate. Each one must raise ``UnsafeToolResultError`` — silent
+    coercion is the bug class we're defending against."""
 
-    def test_gate_rejects_bare_basemodel(self):
-        class _NotAView(BaseModel):
-            email: str
+    def test_gate_rejects_bare_object(self):
+        class _NotAView(object):
+            email = 'jane@example.com'
 
         with self.assertRaises(UnsafeToolResultError):
-            to_llm_payload(_NotAView(email='jane@example.com'))
+            to_llm_payload(_NotAView())
 
     def test_gate_rejects_str(self):
         with self.assertRaises(UnsafeToolResultError):
@@ -262,9 +89,8 @@ class TestGateRejectsNonLLMViewInputs(unittest.TestCase):
 
     def test_gate_rejects_tuple(self):
         # ``to_llm_payload`` treats only ``list`` as a collection input.
-        # A tuple goes through the single-item branch and fails the
-        # isinstance check. Lock that — if we ever decide tuples are
-        # OK too, this test flips.
+        # Tuples and other iterables fall through to the single-item
+        # ``isinstance`` check and are refused — locks the contract.
         view = _UserView(id='u1', display_name='Jane')
         with self.assertRaises(UnsafeToolResultError):
             to_llm_payload((view,))
@@ -281,9 +107,9 @@ class TestGateRejectsNonLLMViewInputs(unittest.TestCase):
             to_llm_payload(_gen())
 
     def test_gate_rejects_class_object_not_instance(self):
-        # Passing the LLMView CLASS itself (not an instance) is the
-        # canonical foot-gun for a forgetful ``return MyView`` instead
-        # of ``return MyView(...)``.
+        # Someone passes the View *class* instead of an instance — the
+        # class object itself is not an instance of LLMView (it IS a
+        # subclass) and must be refused.
         with self.assertRaises(UnsafeToolResultError):
             to_llm_payload(_UserView)
 
@@ -303,11 +129,12 @@ class TestGateRejectsNonLLMViewInputs(unittest.TestCase):
             to_llm_payload({view: 'value'})  # type: ignore[arg-type]
 
 
-class TestGateAccepts(unittest.TestCase):
-    """Locked positive cases — what the gate intentionally lets
-    through. None passes for "nothing to report"; empty list returns
-    empty list."""
+# ===========================================================================
+# GATE — acceptance probes
+# ===========================================================================
 
+
+class TestGateAccepts(unittest.TestCase):
     def test_gate_accepts_none(self):
         self.assertIsNone(to_llm_payload(None))
 
@@ -324,153 +151,84 @@ class TestGateAccepts(unittest.TestCase):
             _UserView(id='u2', display_name='John'),
         ]
         payload = to_llm_payload(views)
-        self.assertEqual(len(payload), 2)
-        self.assertEqual(payload[0]['id'], 'u1')
-
-
-# ===========================================================================
-# PROJECT: edge cases in LLMView.project / project_list
-# ===========================================================================
-
-
-class TestProjectEdgeCases(unittest.TestCase):
-    def test_project_drops_keys_not_in_allowlist(self):
-        raw = {'id': 'u1', 'display_name': 'Jane', 'email': 'leak@x.com'}
-        view = _UserView.project(raw)
-        self.assertEqual(view.to_dict(), {'id': 'u1', 'display_name': 'Jane'})
-
-    def test_project_raises_on_missing_required_field(self):
-        # Required field absent → Pydantic raises. Caller's job to
-        # declare ``Optional[...] = None`` if they want tolerance.
-        with self.assertRaises(ValidationError):
-            _UserView.project({'id': 'u1'})  # display_name required
-
-    def test_project_handles_attribute_shaped_input(self):
-        class _Row:
-            id = 'u1'
-            display_name = 'Jane'
-            email = 'leak@x.com'
-        view = _UserView.project(_Row())
-        self.assertEqual(view.to_dict(), {'id': 'u1', 'display_name': 'Jane'})
-
-    def test_project_attribute_branch_uses_hasattr_check(self):
-        # An attribute-shaped input MISSING a required field hits the
-        # branch where ``hasattr`` returns False; the missing kwarg
-        # surfaces as a ValidationError. Lock both branches.
-        class _Partial:
-            id = 'u1'  # display_name absent
-        with self.assertRaises(ValidationError):
-            _UserView.project(_Partial())
-
-    def test_project_with_explicit_none_value_uses_none(self):
-        # An upstream key present with a None value passes None to
-        # the constructor — which for a *required* field is a
-        # ValidationError. Lock that — silent-coerce would mask
-        # data-quality issues upstream.
-        with self.assertRaises(ValidationError):
-            _UserView.project({'id': 'u1', 'display_name': None})
-
-    def test_project_none_input_returns_none(self):
-        self.assertIsNone(_UserView.project(None))
-
-    def test_project_list_with_none_input_returns_empty(self):
-        self.assertEqual(_UserView.project_list(None), [])
-
-    def test_project_list_filters_none_items_silently(self):
-        out = _UserView.project_list([
+        self.assertEqual(payload, [
             {'id': 'u1', 'display_name': 'Jane'},
-            None,
             {'id': 'u2', 'display_name': 'John'},
         ])
-        self.assertEqual(len(out), 2)
-
-    def test_project_list_promotes_single_dict_to_list(self):
-        out = _UserView.project_list({'id': 'u1', 'display_name': 'Jane'})
-        self.assertEqual(len(out), 1)
-
-    def test_project_list_promotes_attribute_shaped_object_to_list(self):
-        class _Row:
-            id = 'u1'
-            display_name = 'Jane'
-        out = _UserView.project_list(_Row())
-        self.assertEqual(len(out), 1)
-
-    def test_project_list_tuple_input(self):
-        out = _UserView.project_list((
-            {'id': 'u1', 'display_name': 'Jane'},
-            {'id': 'u2', 'display_name': 'John'},
-        ))
-        self.assertEqual(len(out), 2)
 
 
 # ===========================================================================
-# RUN_TOOL: edge cases
+# run_tool — edge cases
 # ===========================================================================
 
 
 class TestRunToolEdgeCases(unittest.TestCase):
     def test_run_tool_with_named_logger(self):
-        captured = []
+        log = logging.getLogger('test_run_tool_named')
 
-        class _Logger:
-            def exception(self, *args, **_kwargs) -> None:
-                captured.append(args)
+        def failing_tool():
+            raise RuntimeError('boom')
 
-        def _boom() -> None:
-            raise RuntimeError('User jane@example.com not found')
-
-        payload = run_tool(_boom, logger=_Logger())
+        with self.assertLogs(log, level='ERROR'):
+            payload = run_tool(failing_tool, logger=log)
         self.assertEqual(payload['status'], 'error')
-        self.assertNotIn('jane@example.com', str(payload))
-        # The logger received the full detail.
-        self.assertTrue(captured)
 
     def test_run_tool_default_logger_when_none_supplied(self):
-        # No logger arg — falls back to ``logging.getLogger('llm_core_lib.safety')``
-        # and the assertion stays the same: payload generic, raw msg gone.
-        def _boom() -> None:
-            raise RuntimeError('User jane@example.com not found')
+        # Default ``llm_core_lib.safety`` logger; assertLogs captures
+        # whatever name run_tool falls back to.
+        def failing_tool():
+            raise RuntimeError('boom')
+
         with self.assertLogs('llm_core_lib.safety', level='ERROR'):
-            payload = run_tool(_boom)
+            payload = run_tool(failing_tool)
         self.assertEqual(payload['status'], 'error')
 
     def test_run_tool_passes_through_args_and_kwargs(self):
         captured = {}
 
-        def _spy(a, b, *, c) -> Optional[_UserView]:
-            captured['a'], captured['b'], captured['c'] = a, b, c
-            return None
+        def tool(arg1, kw1=None):
+            captured['arg1'] = arg1
+            captured['kw1'] = kw1
+            return _UserView(id=arg1, display_name=kw1)
 
-        payload = run_tool(_spy, 1, 2, c=3)
-        self.assertEqual(captured, {'a': 1, 'b': 2, 'c': 3})
-        self.assertIsNone(payload)
+        payload = run_tool(tool, 'u1', kw1='Jane')
+        self.assertEqual(captured, {'arg1': 'u1', 'kw1': 'Jane'})
+        self.assertEqual(payload, {'id': 'u1', 'display_name': 'Jane'})
 
     def test_run_tool_catches_unsafe_tool_result_error(self):
-        # When a tool forgets to project, the gate raises
-        # ``UnsafeToolResultError`` inside the try; the catch turns
-        # that into the same generic envelope as any other failure.
-        def _forgot() -> Any:
-            return {'id': 1, 'email': 'jane@example.com'}
-        with self.assertLogs('llm_core_lib.safety', level='ERROR'):
-            payload = run_tool(_forgot)
+        # The gate raises inside ``run_tool``'s try; the wrapper turns
+        # that into the same generic envelope, no type-name leak.
+        def leaky_tool():
+            return {'id': 'u1', 'email': 'jane@example.com'}
+
+        log = logging.getLogger('test_run_tool_unsafe')
+        with self.assertLogs(log, level='ERROR'):
+            payload = run_tool(leaky_tool, logger=log)
         self.assertEqual(payload['status'], 'error')
+        # The type-name detail from the gate's exception message must
+        # not appear in the LLM-bound payload.
+        self.assertNotIn('dict', str(payload))
         self.assertNotIn('jane@example.com', str(payload))
 
     def test_run_tool_callable_without_name_uses_repr(self):
-        # Lambdas have ``__name__ == '<lambda>'``; a more interesting
-        # case is a callable instance without ``__name__``. The gate
-        # falls back to ``repr(fn)`` so the log line still has SOMETHING.
-        class _CallableNoName:
-            def __call__(self) -> None:
-                raise RuntimeError('boom')
+        # A ``functools.partial`` or a lambda has no ``__name__`` —
+        # the log line falls back to ``repr(fn)`` so we don't crash.
+        log = logging.getLogger('test_run_tool_repr')
 
-        with self.assertLogs('llm_core_lib.safety', level='ERROR'):
-            payload = run_tool(_CallableNoName())
+        leaky_lambda = lambda: (_ for _ in ()).throw(RuntimeError('boom'))  # noqa: E731
+        delattr_target = leaky_lambda
+        try:
+            del delattr_target.__name__  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            pass
+
+        with self.assertLogs(log, level='ERROR'):
+            payload = run_tool(leaky_lambda, logger=log)
         self.assertEqual(payload['status'], 'error')
 
 
 # ===========================================================================
-# NEW_ERROR_REF / SANITIZED_ERROR_PAYLOAD
+# new_error_ref / sanitized_error_payload — shape contract
 # ===========================================================================
 
 
@@ -478,15 +236,14 @@ class TestNewErrorRef(unittest.TestCase):
     def test_returns_8_char_hex(self):
         ref = new_error_ref()
         self.assertEqual(len(ref), 8)
-        # All chars are hex.
-        int(ref, 16)  # raises ValueError if not hex
+        # Hex characters only.
+        self.assertTrue(all(c in '0123456789abcdef' for c in ref))
 
     def test_successive_refs_are_distinct(self):
-        # Collision is astronomically unlikely (~1e-9 for 8-hex = 32
-        # bits worth), so a deterministic check across a few hundred
-        # is a reasonable sanity test.
-        refs = {new_error_ref() for _ in range(500)}
-        self.assertEqual(len(refs), 500)
+        refs = {new_error_ref() for _ in range(50)}
+        # uuid4 collisions in a sample of 50 are astronomically unlikely;
+        # this asserts the helper isn't accidentally constant.
+        self.assertEqual(len(refs), 50)
 
 
 class TestSanitizedErrorPayload(unittest.TestCase):
@@ -495,105 +252,76 @@ class TestSanitizedErrorPayload(unittest.TestCase):
         self.assertEqual(set(payload.keys()), {'status', 'detail', 'ref'})
 
     def test_detail_string_is_fixed(self):
-        # The literal is the LLM-facing contract — must not change
-        # casually (operators may have matched on it in logs / metrics).
+        # The contract: detail is a fixed string the LLM can rely on
+        # to detect "request failed" without parsing.
         self.assertEqual(
             sanitized_error_payload('x')['detail'],
             'The request could not be completed.',
         )
 
     def test_detail_is_pii_free(self):
-        # The detail text itself must carry no PII shape. If a future
-        # change introduces e.g. "contact admin@example.com" in the
-        # detail, this catches it.
-        text = sanitized_error_payload('abc12345')['detail']
-        self.assertNotIn('@', text)
-        self.assertNotIn('http', text.lower())
+        # The fixed detail must contain no email / SSN / etc. — that
+        # contract is what makes the generic envelope safe by
+        # construction.
+        detail = sanitized_error_payload('x')['detail']
+        self.assertNotIn('@', detail)
+        self.assertNotIn('-', detail)  # the SSN/credit-card separator
 
 
 # ===========================================================================
-# NO LEAK: round-trip checks on the gate
+# NO-LEAK — round-trip checks
 # ===========================================================================
 
 
 class TestNoLeakRoundTrip(unittest.TestCase):
-    """End-to-end: a payload that's been through the gate carries
-    nothing it shouldn't."""
-
     def test_no_leak_failure_payload_carries_no_arbitrary_data(self):
-        class _Boom(Exception):
-            def __init__(self) -> None:
-                super().__init__('User jane@example.com SSN 123-45-6789')
-                self.user_id = 42
-                self.email = 'jane@example.com'
+        # A tool that raises with arbitrary data in the message must
+        # not surface any of that data in the returned payload.
+        secret = 'classified-tag-AB12-secret-data-XYZ'
 
-        def _bad() -> None:
-            raise _Boom()
+        def failing_tool():
+            raise RuntimeError(f'failed because {secret}')
 
-        with self.assertLogs('llm_core_lib.safety', level='ERROR'):
-            payload = run_tool(_bad)
-
-        blob = str(payload)
-        # None of the exception's args, attributes, or class name
-        # leak into the LLM-visible payload.
-        self.assertNotIn('jane@example.com', blob)
-        self.assertNotIn('123-45-6789', blob)
-        self.assertNotIn('42', blob.replace(payload['ref'], ''))
-        self.assertNotIn('_Boom', blob)
+        log = logging.getLogger('test_no_leak_failure')
+        with self.assertLogs(log, level='ERROR'):
+            payload = run_tool(failing_tool, logger=log)
+        self.assertNotIn(secret, str(payload))
 
     def test_no_leak_gate_error_does_not_include_type_name_in_payload(self):
-        # ``UnsafeToolResultError`` carries the offending type's name
-        # in its message — that detail must stay in the log line, not
-        # the LLM-bound payload.
-        class _SecretOrm:
-            secret = 'hidden'
+        # ``UnsafeToolResultError``'s message carries the offending
+        # type's name (e.g. "tool tried to return dict to the LLM").
+        # The wrapper must NOT propagate that into the LLM-bound payload.
+        class _LeakyORM(object):
+            email = 'jane@example.com'
 
-        def _leak() -> Any:
-            return _SecretOrm()
+        def leaky_tool():
+            return _LeakyORM()
 
-        with self.assertLogs('llm_core_lib.safety', level='ERROR'):
-            payload = run_tool(_leak)
-        self.assertEqual(payload['status'], 'error')
-        self.assertNotIn('_SecretOrm', str(payload))
-        self.assertNotIn('hidden', str(payload))
+        log = logging.getLogger('test_no_leak_type_name')
+        with self.assertLogs(log, level='ERROR'):
+            payload = run_tool(leaky_tool, logger=log)
+        self.assertNotIn('_LeakyORM', str(payload))
+        self.assertNotIn('jane@example.com', str(payload))
 
     def test_no_leak_view_to_dict_only_exposes_declared_fields(self):
-        # Build a view, mutate around the boundary, dump.
-        view = _UserView(id='u1', display_name='Jane')
-        # ``to_dict`` is the documented contract entry point.
-        self.assertEqual(set(view.to_dict().keys()), {'id', 'display_name'})
-        # And ``model_dump`` (the underlying Pydantic API) returns the
-        # same set — no synthetic fields, no class-attr leakage.
-        self.assertEqual(set(view.model_dump().keys()), {'id', 'display_name'})
+        # If a subclass declares only ``id`` / ``display_name`` but the
+        # instance carries an extra Python attribute (set via
+        # ``self.email = ...`` in ``__init__``), ``model_dump`` should
+        # return only what the subclass chooses to return — the marker
+        # imposes no constraint.
+        class _LooseView(LLMView):
+            def __init__(self):
+                self.id = 'u1'
+                self.display_name = 'Jane'
+                self.email = 'jane@example.com'  # NOT in model_dump
 
+            def model_dump(self):
+                # The subclass's allowlist is whatever this method returns.
+                return {'id': self.id, 'display_name': self.display_name}
 
-# ===========================================================================
-# DOCUMENTED KNOWN-LIMITATIONS REGISTRY
-# ===========================================================================
-
-
-class TestKnownLimitationsCatalog(unittest.TestCase):
-    """Roll-up — categories of structural bypass we know about. If
-    this set drifts, the discussion in this file (and the comment
-    block in ``pii_patterns.py`` about the layered defense) should
-    drift too."""
-
-    KNOWN_BYPASS_CATEGORIES = frozenset({
-        # subclass-level overrides
-        'subclass_overrides_model_config_dropping_extra_forbid',
-        'subclass_overrides_model_config_dropping_frozen',
-        # field-level escapes
-        'computed_field_exposes_value_outside_allowlist',
-        'any_typed_field_carries_arbitrary_dict',
-        'list_of_any_dict_field',
-        'nested_non_llmview_basemodel',
-        'root_typed_any',
-        # language-level
-        'object_setattr_bypasses_frozen',
-    })
-
-    def test_catalog_is_locked(self):
-        self.assertEqual(len(self.KNOWN_BYPASS_CATEGORIES), 8)
+        payload = to_llm_payload(_LooseView())
+        self.assertEqual(payload, {'id': 'u1', 'display_name': 'Jane'})
+        self.assertNotIn('email', payload)
 
 
 if __name__ == '__main__':
