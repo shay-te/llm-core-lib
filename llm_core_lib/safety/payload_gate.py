@@ -76,9 +76,11 @@ def to_llm_payload(result: Any) -> Any:
     if result is None:
         return None
     if isinstance(result, list):
+        dumped_items = []
         for item in result:
             _ensure_llm_view(item)
-        return [item.model_dump() for item in result]
+            dumped_items.append(item.model_dump())
+        return dumped_items
     _ensure_llm_view(result)
     return result.model_dump()
 
@@ -131,17 +133,17 @@ def run_tool(
     (email)=(john@acme.com)") that the success path is structured to
     keep out.
     """
-    log = logger if logger is not None else logging.getLogger('llm_core_lib.safety')
+    effective_logger = logger or logging.getLogger('llm_core_lib.safety')
     try:
         result = fn(*args, **kwargs)
-        # The gate is inside the try on purpose — an UnsafeToolResultError
-        # means the tool returned a non-LLMView shape (a bug in the tool),
-        # and we want the LLM to see the generic envelope, not the
-        # type-name detail the gate's message carries.
+        # Gate inside the try on purpose: an ``UnsafeToolResultError``
+        # from a tool that returned a non-LLMView shape must also be
+        # sanitized — the LLM must not see the type-name detail the
+        # gate's message carries.
         return to_llm_payload(result)
     except Exception:  # noqa: BLE001 — sanitized error path; full detail goes to the log
         ref = new_error_ref()
-        log.exception(
+        effective_logger.exception(
             'llm tool %s failed [ref=%s]',
             getattr(fn, '__name__', repr(fn)),
             ref,

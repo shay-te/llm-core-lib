@@ -35,7 +35,7 @@ except ImportError:
     _status_code_exception_module = types.ModuleType(
         'core_lib.error_handling.status_code_exception'
     )
-    _connection_pkg = types.ModuleType('core_lib.connection')
+    _connection_package_module = types.ModuleType('core_lib.connection')
     _connection_factory_module = types.ModuleType(
         'core_lib.connection.connection_factory'
     )
@@ -105,11 +105,11 @@ except ImportError:
     _core_lib_main_module.CoreLib = CoreLib
 
     _error_handling_module.status_code_exception = _status_code_exception_module
-    _connection_pkg.connection_factory = _connection_factory_module
-    _connection_pkg.connection = _connection_module
+    _connection_package_module.connection_factory = _connection_factory_module
+    _connection_package_module.connection = _connection_module
 
     _core_lib_module.error_handling = _error_handling_module
-    _core_lib_module.connection = _connection_pkg
+    _core_lib_module.connection = _connection_package_module
     _core_lib_module.core_lib = _core_lib_main_module
 
     sys.modules.setdefault('core_lib', _core_lib_module)
@@ -118,7 +118,7 @@ except ImportError:
         'core_lib.error_handling.status_code_exception',
         _status_code_exception_module,
     )
-    sys.modules.setdefault('core_lib.connection', _connection_pkg)
+    sys.modules.setdefault('core_lib.connection', _connection_package_module)
     sys.modules.setdefault(
         'core_lib.connection.connection_factory',
         _connection_factory_module,

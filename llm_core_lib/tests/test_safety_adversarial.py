@@ -164,13 +164,13 @@ class TestGateAccepts(unittest.TestCase):
 
 class TestRunToolEdgeCases(unittest.TestCase):
     def test_run_tool_with_named_logger(self):
-        log = logging.getLogger('test_run_tool_named')
+        logger = logging.getLogger('test_run_tool_named')
 
         def failing_tool():
             raise RuntimeError('boom')
 
-        with self.assertLogs(log, level='ERROR'):
-            payload = run_tool(failing_tool, logger=log)
+        with self.assertLogs(logger, level='ERROR'):
+            payload = run_tool(failing_tool, logger=logger)
         self.assertEqual(payload['status'], 'error')
 
     def test_run_tool_default_logger_when_none_supplied(self):
@@ -201,9 +201,9 @@ class TestRunToolEdgeCases(unittest.TestCase):
         def leaky_tool():
             return {'id': 'u1', 'email': 'jane@example.com'}
 
-        log = logging.getLogger('test_run_tool_unsafe')
-        with self.assertLogs(log, level='ERROR'):
-            payload = run_tool(leaky_tool, logger=log)
+        logger = logging.getLogger('test_run_tool_unsafe')
+        with self.assertLogs(logger, level='ERROR'):
+            payload = run_tool(leaky_tool, logger=logger)
         self.assertEqual(payload['status'], 'error')
         # The type-name detail from the gate's exception message must
         # not appear in the LLM-bound payload.
@@ -211,19 +211,15 @@ class TestRunToolEdgeCases(unittest.TestCase):
         self.assertNotIn('jane@example.com', str(payload))
 
     def test_run_tool_callable_without_name_uses_repr(self):
-        # A ``functools.partial`` or a lambda has no ``__name__`` —
-        # the log line falls back to ``repr(fn)`` so we don't crash.
-        log = logging.getLogger('test_run_tool_repr')
+        # A bare callable object (no ``__name__``) — the log line
+        # falls back to ``repr(fn)`` so the wrapper doesn't crash.
+        class _NamelessCallable(object):
+            def __call__(self):
+                raise RuntimeError('boom')
 
-        leaky_lambda = lambda: (_ for _ in ()).throw(RuntimeError('boom'))  # noqa: E731
-        delattr_target = leaky_lambda
-        try:
-            del delattr_target.__name__  # type: ignore[attr-defined]
-        except (AttributeError, TypeError):
-            pass
-
-        with self.assertLogs(log, level='ERROR'):
-            payload = run_tool(leaky_lambda, logger=log)
+        logger = logging.getLogger('test_run_tool_repr')
+        with self.assertLogs(logger, level='ERROR'):
+            payload = run_tool(_NamelessCallable(), logger=logger)
         self.assertEqual(payload['status'], 'error')
 
 
