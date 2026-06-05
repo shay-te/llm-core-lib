@@ -149,28 +149,39 @@ belongs in a host app or a separate library that *consumes* this one.
 
 ## Test file organization — one TestCase per file, filename mirrors the class
 
-**Every new test file owns exactly one `unittest.TestCase` subclass,
-and the filename is the snake_case form of that class name.** This is
-a workspace-wide rule — see the "Test file organization" sub-section
-of "Coding conventions (workspace-wide, all Python repos)" in
-`architecture.md` for the full rationale, the helper-module pattern,
-and the canonical examples.
+**Every test file in this repo owns exactly one `unittest.TestCase`
+subclass, and the filename is the snake_case form of that class
+name.** This is a workspace-wide rule — see the "Test file
+organization" sub-section of "Coding conventions (workspace-wide, all
+Python repos)" in `architecture.md` for the full rationale, the
+helper-module pattern, and the canonical examples.
 
-Inside this repo: any new file under `llm_core_lib/tests/` follows
-the rule. The safety subpackage is the first area to land under it
-(`test_to_llm_payload_accepts_llm_view.py`,
-`test_run_tool_error_path.py`, etc. — one TestCase per file, shared
-fixtures like the test `_UserLLMView` type or the mock SDK clients in
-a sibling `<topic>_helpers.py` module without a `test_` prefix).
+**A file that holds more than one `TestCase` is a defect.** Any time
+you materially touch such a file — adding a test, fixing a flake,
+renaming a fixture — split it before landing the change. "Materially
+touch" includes the operator opening a review thread on it; a
+reviewer flagging the multi-class shape is itself a trigger to split.
+Don't add new tests to an already-multi-class file: split first, add
+second, in the same PR.
+
+The helper-module pattern: shared fixtures (a stub view, a fake
+service, a sample payload) live in a sibling `<topic>_helpers.py`
+module **without** a `test_` prefix so the discoverers (`unittest
+discover`, `pytest`) skip it. Canonical example:
+`safety_llm_view_helpers.py` is shared by
+`test_llm_view_is_a_class.py` and
+`test_llm_view_isinstance_check.py`.
+
 Genuinely pre-existing multi-class files (`test_boundary.py`,
 `test_exports.py`) are **not** required to be split retroactively —
 apply the rule forward, with new files and any time you're materially
 touching an old one. The `test_safety_*` set was added in this PR
-(UNA-2727) and still has multiple TestCase classes per file
-(`test_safety_llm_view.py` 6, `test_safety_payload_gate.py` 6,
-`test_safety_adversarial.py` 13); those should be split into
-one-TestCase-per-file the next time they're materially touched —
-documented as a debt, not endorsement.
+(UNA-2727) and the remaining multi-class files
+(`test_safety_payload_gate.py` 6, `test_safety_adversarial.py` 13)
+should be split into one-TestCase-per-file the next time they're
+materially touched — documented as a debt, not endorsement.
+`test_safety_llm_view.py` has been split (see the canonical example
+above).
 
 ## Tests prefer real collaborators over mocks
 
