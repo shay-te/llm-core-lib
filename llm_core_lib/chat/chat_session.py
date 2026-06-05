@@ -1,26 +1,12 @@
 """``ChatSession`` — drives one chat turn end-to-end.
 
-The orchestrator lives here so the rule "history is server-side; the
-frontend only sends a prompt" is enforced in one place. Its
-``run_command`` signature is intentionally tiny:
-
     response_text = chat_session.run_command(hash_id, command)
 
-Everything else (history fetch + handler dispatch + tool-loop +
-persistence + text extraction) is hidden.
-
-Hard-coded properties:
-
-  * History is fetched from :class:`ChatHistoryStore`, never from
-    the caller. The connection's ``chat_with_tools`` still accepts
-    ``input_messages`` because the connection is a thin SDK adapter
-    — but only this orchestrator ever calls it.
-  * The recent-history fetch is bounded by ``max_chat_history`` so
-    provider-side exposure stays O(1) per turn regardless of how
-    long-lived the conversation is.
-  * The conversation's stored ``kind`` is the dispatch key — the
-    same handler that wrote a turn reads it back, so the on-wire
-    shape never drifts between writer and reader.
+History is fetched from :class:`ChatHistoryStore` (never from the
+caller), bounded by ``max_chat_history`` (count) + ``max_chat_tokens``
+(token estimate). The conversation's stored ``kind`` is the
+dispatch key — the same handler reads and writes its turns, so the
+on-wire shape never drifts.
 """
 from __future__ import annotations
 
@@ -30,23 +16,20 @@ from typing import Any, Callable, Dict, List, Optional
 from llm_core_lib.chat.chat_handler import ChatHandler
 from llm_core_lib.chat.chat_handler_registry import ChatHandlerRegistry
 from llm_core_lib.chat.chat_history_store import ChatHistoryStore, SENDER_USER
+from llm_core_lib.chat.history_budget import truncate_to_token_budget
 from llm_core_lib.safety.payload_gate import scrub_history_for_llm
 
 
-# Default cap on the recent-history fetch. The host can override via
-# the constructor (typically from ``core_lib.llm.chat.max_chat_history``
-# in its Hydra config). Picked high enough that normal admin chats
-# don't truncate but low enough that a malicious/long-lived
-# conversation can't blow up the provider request size.
+# Host can override via constructor (typically from
+# ``core_lib.llm.max_chat_history`` / ``...max_chat_tokens``).
 DEFAULT_MAX_CHAT_HISTORY = 50
+# 0 disables the token cap (message-count cap still applies). 12000
+# leaves headroom for completion on a 16k-context model.
+DEFAULT_MAX_CHAT_TOKENS = 12000
 
 
 class ChatSessionNotFound(LookupError):
-    """The hash id didn't resolve to a conversation in the store.
-
-    Distinguishable from other ``LookupError``s so the host's web
-    layer can map it to a 404 if desired (otherwise the choke-point
-    sanitizer envelopes it like any other failure)."""
+    """Distinguishable so the host's web layer can map it to 404."""
 
 
 class ChatSession(object):
@@ -60,27 +43,13 @@ class ChatSession(object):
         tools: list,
         invoke_tool: Callable[[str, dict], Any],
         max_chat_history: int = DEFAULT_MAX_CHAT_HISTORY,
+        max_chat_tokens: int = DEFAULT_MAX_CHAT_TOKENS,
         max_tool_call_rounds: Optional[int] = None,
         logger: Optional[logging.Logger] = None,
     ):
-        """All collaborators in once at composition root.
-
-        Args:
-            history_store: persistence boundary.
-            connection_factory: anything whose ``.get()`` returns a
-                context manager whose ``__enter__`` yields a
-                Connection (matching this project's
-                ``OpenAiConnection`` / ``BedrockConnection`` shape).
-            handler_registry: dispatch by conversation ``kind``.
-            instructions: system-prompt text passed to the connection.
-            tools: function-tool schema list.
-            invoke_tool: callback ``(name, kwargs) -> result`` — the
-                caller's choke point (authorization + gate + scrub).
-            max_chat_history: cap on the recent-history fetch.
-            max_tool_call_rounds: forwarded to the connection's loop;
-                ``None`` uses the connection's own default.
-            logger: scoped logger; defaults to the module logger.
-        """
+        # ``invoke_tool`` is the host's choke point (auth + gate +
+        # scrub). ``max_tool_call_rounds=None`` defers to the
+        # connection's own default.
         self._history_store = history_store
         self._connection_factory = connection_factory
         self._handler_registry = handler_registry
@@ -88,6 +57,7 @@ class ChatSession(object):
         self._tools = tools
         self._invoke_tool = invoke_tool
         self._max_chat_history = max_chat_history
+        self._max_chat_tokens = max_chat_tokens
         self._max_tool_call_rounds = max_tool_call_rounds
         self._logger = logger or logging.getLogger(__name__)
 
@@ -100,10 +70,7 @@ class ChatSession(object):
         name: str = 'New chat',
         scope_meta_data: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Open a new conversation; return its client-facing hash id."""
-        # Fail fast on unknown kind — better than letting an orphan
-        # conversation get created that no handler can ever read. The
-        # registry's ``get`` raises ``UnknownChatKindError``.
+        # Fail fast on unknown kind — registry.get raises.
         self._handler_registry.get(kind)
         return self._history_store.create_conversation(
             owner_user_id=owner_user_id,
@@ -113,13 +80,8 @@ class ChatSession(object):
         )
 
     def run_command(self, hash_id: str, command: str) -> str:
-        """Drive one chat turn end-to-end.
-
-        Returns:
-            The assistant's final text reply (provider-extracted by
-            the matching handler). The full new exchange is already
-            persisted in the store by the time this returns.
-        """
+        """Drive one turn; persist user prompt + every loop message;
+        return assistant text."""
         conversation = self._history_store.conversation_by_hash(hash_id)
         if conversation is None:
             raise ChatSessionNotFound(f'no conversation for hash_id={hash_id!r}')
@@ -147,16 +109,20 @@ class ChatSession(object):
             meta_data=user_prompt_msg,
         )
 
-        # Snapshot the prefix length so the handler can diff the new
-        # tail later. ``input_messages`` is what the connection sees
-        # going IN; ``final_messages`` is what it returns.
-        prefix_len = len(input_messages)
-
+        # Token-budget truncation first — drops oldest messages
+        # until the input list fits ``max_chat_tokens``. The
+        # message-count cap already bounded the fetch; this is the
+        # safety net for "50 messages but each one is huge".
+        bounded = truncate_to_token_budget(input_messages, self._max_chat_tokens)
         # Scrub PII out of prior-turn messages before re-sending to
         # the LLM. The last message (the just-built user prompt)
         # stays raw — admins legitimately type PII to look users up.
         # Storage stays raw too; the scrub is read-path only.
-        scrubbed_for_llm = scrub_history_for_llm(input_messages)
+        scrubbed_for_llm = scrub_history_for_llm(bounded)
+        # Snapshot AFTER truncation+scrub — the connection mutates
+        # ``scrubbed_for_llm`` in place and ``final_messages`` is
+        # that same list. The diff is the tail past this length.
+        prefix_len = len(scrubbed_for_llm)
 
         with self._connection_factory.get() as connection:
             chat_kwargs = dict(
@@ -195,12 +161,6 @@ class ChatSession(object):
     def get_conversation_messages(
         self, hash_id: str, limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Return the stored messages for a conversation, oldest-first.
-
-        Used by the UI to load a past chat. The default ``limit`` is
-        the session's ``max_chat_history`` so the same bound applies
-        to UI and to LLM-input fetches.
-        """
         conversation = self._history_store.conversation_by_hash(hash_id)
         if conversation is None:
             raise ChatSessionNotFound(f'no conversation for hash_id={hash_id!r}')
@@ -210,17 +170,11 @@ class ChatSession(object):
         )
 
     def rename_conversation(self, hash_id: str, new_name: str) -> None:
-        # Lookup-first lets the host's verifier verify cross-tenant
-        # access before the write; the store implementation
-        # presumably also enforces but defense-in-depth.
-        conversation = self._history_store.conversation_by_hash(hash_id)
-        if conversation is None:
+        if self._history_store.conversation_by_hash(hash_id) is None:
             raise ChatSessionNotFound(f'no conversation for hash_id={hash_id!r}')
         self._history_store.rename_conversation(hash_id, new_name)
 
-    @property
-    def handler_registry(self) -> ChatHandlerRegistry:
-        # Exposed so the host can use the registry's ``has`` /
-        # ``kinds`` introspection (the registry is otherwise injected
-        # at construct time).
-        return self._handler_registry
+    def delete_conversation(self, hash_id: str) -> None:
+        if self._history_store.conversation_by_hash(hash_id) is None:
+            raise ChatSessionNotFound(f'no conversation for hash_id={hash_id!r}')
+        self._history_store.delete_conversation(hash_id)

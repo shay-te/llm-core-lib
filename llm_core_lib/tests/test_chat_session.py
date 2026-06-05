@@ -91,6 +91,12 @@ class _InMemoryStore(ChatHistoryStore):
         conv['name'] = new_name
         conv['meta_data']['name'] = new_name
 
+    def delete_conversation(self, hash_id):
+        conv = self._conversations.pop(hash_id, None)
+        if conv is None:
+            return
+        self._messages.pop(conv['id'], None)
+
 
 class _ResponseStub(object):
     def __init__(self, output):
@@ -290,6 +296,20 @@ class TestChatSession(unittest.TestCase):
         session, _, _, _ = _make_session()
         with self.assertRaises(ChatSessionNotFound):
             session.rename_conversation('h-nope', 'X')
+
+    def test_delete_conversation_removes_from_store(self):
+        session, store, _, _ = _make_session()
+        hash_id = session.create_conversation(owner_user_id=1, kind=KIND_OPENAI)
+        session.delete_conversation(hash_id)
+        self.assertIsNone(store.conversation_by_hash(hash_id))
+
+    def test_delete_unknown_hash_raises(self):
+        # Same distinguishable ``ChatSessionNotFound`` as the other
+        # lookups — lets the host return a clean 404 rather than a
+        # silent success.
+        session, _, _, _ = _make_session()
+        with self.assertRaises(ChatSessionNotFound):
+            session.delete_conversation('h-nope')
 
 
 if __name__ == '__main__':

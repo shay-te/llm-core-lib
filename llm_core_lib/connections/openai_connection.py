@@ -8,7 +8,7 @@ read it in isolation.
 import base64
 import json
 import logging
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core_lib.connection.connection import Connection
 
@@ -22,6 +22,29 @@ from llm_core_lib.types import LlmCompletion
 # response without running more tools. Production agents complete
 # well under 100 rounds; this is a runaway stop, not a feature limit.
 DEFAULT_MAX_TOOL_CALL_ROUNDS = 100
+
+
+def _item_to_dict(item: Any) -> Dict[str, Any]:
+    """Convert a Responses-API output item to a plain dict.
+
+    OpenAI's SDK returns Pydantic-shaped objects; downstream chat
+    handlers and the JSON storage column both need real dicts.
+    Tries ``model_dump`` (Pydantic v2), then ``dict``, then ``vars``,
+    then returns the object unchanged so dict inputs (tests) pass
+    through.
+    """
+    if isinstance(item, dict):
+        return item
+    dump = getattr(item, 'model_dump', None)
+    if callable(dump):
+        return dump()
+    to_dict = getattr(item, 'dict', None)
+    if callable(to_dict):
+        return to_dict()
+    try:
+        return dict(vars(item))
+    except TypeError:
+        return item
 
 
 def format_tool_result_for_llm(result: Any) -> str:
@@ -193,10 +216,12 @@ class OpenAiConnection(Connection):
                     )
                     break
                 if item.type == 'message':
-                    content = getattr(item, 'content', None) or []
-                    if content:
-                        text = getattr(content[0], 'text', '') or ''
-                        effective_logger.debug('assistant message: %d chars', len(text))
+                    # Append the terminal assistant message to the
+                    # input list so downstream persistence sees it as
+                    # part of the turn's diff. Without this the reply
+                    # text is in ``response.output`` only and history
+                    # round-trips lose the assistant turn.
+                    input_messages.append(_item_to_dict(item))
                 else:
                     effective_logger.debug('unknown response item type: %r', item.type)
             if next_input_messages is None:
@@ -232,7 +257,12 @@ class OpenAiConnection(Connection):
         else:
             parsed_args = {}
         result = invoke_tool(item.name, parsed_args)
-        input_messages.append(item)
+        # Normalize to a plain dict so downstream JSON storage and
+        # the chat handlers' ``message.get(...)`` accesses work
+        # uniformly. The SDK returns Pydantic objects whose attribute
+        # access (``item.type``) is fine in this module but breaks
+        # the dict-based contract everywhere else.
+        input_messages.append(_item_to_dict(item))
         input_messages.append({
             'type': 'function_call_output',
             'call_id': item.call_id,
