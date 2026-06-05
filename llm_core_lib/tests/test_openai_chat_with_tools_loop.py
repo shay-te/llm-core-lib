@@ -68,8 +68,11 @@ class TestOpenAiChatWithToolsLoop(unittest.TestCase):
         self.assertEqual(len(client.responses_calls), 1)
         self.assertEqual(invoke_tool.calls, [])
         self.assertEqual(response.output[0].type, 'message')
-        # The initial user message survives in the messages list.
-        self.assertEqual(messages, [{'role': 'user', 'content': 'hello'}])
+        # The initial user message survives + the terminal assistant
+        # message is appended (required for history persistence to
+        # capture the assistant turn).
+        self.assertEqual(messages[0], {'role': 'user', 'content': 'hello'})
+        self.assertEqual(messages[-1].get('type'), 'message')
 
     def test_function_call_round_invokes_tool_then_returns_on_next_message(self):
         client = MockOpenAIClient(responses_script=[
@@ -95,20 +98,20 @@ class TestOpenAiChatWithToolsLoop(unittest.TestCase):
         self.assertEqual(invoke_tool.calls, [('list_packages', {'user_id': 42})])
         # The final response is the terminal message.
         self.assertEqual(response.output[0].type, 'message')
-        # Messages list now carries the function_call + function_call_output
-        # (appended by the connection's loop), in addition to the
-        # original user message.
+        # Messages list now carries: user prompt, function_call (as a
+        # plain dict — SDK objects are normalised), function_call_output,
+        # terminal assistant message.
         self.assertEqual(messages[0], {'role': 'user', 'content': 'show me packages'})
-        # Tool result is wrapped in <TOOL_DATA> markers + JSON-serialized
-        # (not Python repr) so the system prompt can instruct the model
-        # to treat the inner content as read-only data.
-        last = messages[-1]
-        self.assertEqual(last['type'], 'function_call_output')
-        self.assertEqual(last['call_id'], 'call_abc')
-        self.assertTrue(last['output'].startswith('<TOOL_DATA>\n'))
-        self.assertTrue(last['output'].endswith('\n</TOOL_DATA>'))
-        self.assertIn('"packages"', last['output'])
-        self.assertIn('"Gold"', last['output'])
+        # function_call_output is wrapped in <TOOL_DATA> markers + JSON.
+        tool_output = next(m for m in messages if m.get('type') == 'function_call_output')
+        self.assertEqual(tool_output['call_id'], 'call_abc')
+        self.assertTrue(tool_output['output'].startswith('<TOOL_DATA>\n'))
+        self.assertTrue(tool_output['output'].endswith('\n</TOOL_DATA>'))
+        self.assertIn('"packages"', tool_output['output'])
+        self.assertIn('"Gold"', tool_output['output'])
+        # Terminal assistant message is the last item (was previously
+        # dropped — locked here so a regression breaks the test).
+        self.assertEqual(messages[-1].get('type'), 'message')
 
     def test_arguments_are_json_parsed_before_invoke_tool(self):
         # The OpenAI Responses API delivers ``arguments`` as a JSON

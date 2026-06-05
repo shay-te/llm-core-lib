@@ -137,8 +137,13 @@ class ChatSession(object):
             response, final_messages = connection.chat_with_tools(**chat_kwargs)
 
         # Persist everything the loop added on top of our snapshot.
+        # The diff slice MUST come from the list the connection
+        # actually mutated (``scrubbed_for_llm`` == ``final_messages``),
+        # not from the pre-truncation raw list, so handlers that
+        # inspect content (rather than just length) get the right
+        # window.
         new_messages = handler.diff_new_messages(
-            input_messages_before=input_messages[:prefix_len],
+            input_messages_before=final_messages[:prefix_len],
             final_messages=final_messages,
         )
         for message in new_messages:
