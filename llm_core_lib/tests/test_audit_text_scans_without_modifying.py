@@ -21,12 +21,26 @@ class TestAuditTextScansWithoutModifying(unittest.TestCase):
 
     def test_clean_text_returns_empty_findings_and_no_log(self):
         logger = logging.getLogger('test_audit_text_clean')
-        # ``assertNoLogs`` is the idiomatic "nothing fired" assertion.
-        with self.assertNoLogs(logger, level='WARNING'):
+        # ``self.assertNoLogs`` is Python 3.10+. Reimplemented inline so
+        # the suite runs on the workspace's 3.9 baseline.
+        records = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        capture = _Capture(level=logging.WARNING)
+        logger.addHandler(capture)
+        try:
             findings = audit_text(
                 'please ping the user once available',
                 audit_logger=logger,
             )
+        finally:
+            logger.removeHandler(capture)
+        self.assertEqual(
+            [r for r in records if r.levelno >= logging.WARNING], [],
+        )
         self.assertEqual(findings, [])
 
     def test_pii_text_returns_findings_and_audit_logs(self):

@@ -221,12 +221,10 @@ class OpenAiConnection(Connection):
         own normalisation can take over). Returns the mutated
         ``input_messages`` so the loop can re-bind it.
         """
-        from json import loads as _json_loads
-
         raw_args = getattr(item, 'arguments', None)
         if isinstance(raw_args, str):
             try:
-                parsed_args = _json_loads(raw_args) if raw_args else {}
+                parsed_args = json.loads(raw_args) if raw_args else {}
             except ValueError:
                 parsed_args = {}
         elif isinstance(raw_args, dict):

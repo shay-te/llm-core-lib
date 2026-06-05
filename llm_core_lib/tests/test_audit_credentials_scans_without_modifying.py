@@ -18,15 +18,37 @@ import unittest
 from llm_core_lib.safety.payload_gate import audit_credentials
 
 
+class _CaptureHandler(logging.Handler):
+    """``self.assertNoLogs`` is Python 3.10+. Capture records ourselves
+    so the suite runs on the workspace's 3.9 baseline."""
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+
 class TestAuditCredentialsScansWithoutModifying(unittest.TestCase):
+
+    def _assert_no_warnings(self, logger, fn):
+        capture = _CaptureHandler()
+        logger.addHandler(capture)
+        try:
+            fn()
+        finally:
+            logger.removeHandler(capture)
+        self.assertEqual(
+            [r for r in capture.records if r.levelno >= logging.WARNING], [],
+        )
 
     def test_clean_text_does_not_log(self):
         logger = logging.getLogger('test_audit_credentials_clean')
-        with self.assertNoLogs(logger, level='WARNING'):
-            audit_credentials(
-                'please ping the user once available',
-                audit_logger=logger,
-            )
+        self._assert_no_warnings(logger, lambda: audit_credentials(
+            'please ping the user once available',
+            audit_logger=logger,
+        ))
 
     def test_credential_in_text_logs_warning_with_context(self):
         logger = logging.getLogger('test_audit_credentials_aws')
@@ -46,8 +68,9 @@ class TestAuditCredentialsScansWithoutModifying(unittest.TestCase):
     def test_empty_text_does_not_crash(self):
         # Audit-only — returns None either way. No log fired.
         logger = logging.getLogger('test_audit_credentials_empty')
-        with self.assertNoLogs(logger, level='WARNING'):
-            audit_credentials('', audit_logger=logger)
+        self._assert_no_warnings(logger, lambda: audit_credentials(
+            '', audit_logger=logger,
+        ))
 
     def test_does_not_modify_the_input(self):
         # The function is detective-only — the caller's string survives
