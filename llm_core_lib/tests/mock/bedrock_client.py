@@ -1,8 +1,14 @@
 """Mock ``boto3.client('bedrock-runtime')`` for the connection-factory
-tests. Mirrors ``invoke_model`` and records every call into ``calls``
-for assertions. Returns Anthropic-on-Bedrock-shaped payloads by
-default; pass ``legacy_completion`` or ``titan_results`` to exercise
-the legacy / Titan fallback paths, or ``embedding`` to exercise embed.
+tests. Mirrors ``invoke_model`` (Chat Completions / Vision / Embedding
+via Anthropic-on-Bedrock body) and ``converse`` (Bedrock Converse API
+with tool use — drives ``chat_with_tools``).
+
+Returns Anthropic-on-Bedrock-shaped payloads by default; pass
+``legacy_completion`` or ``titan_results`` to exercise the legacy /
+Titan fallback paths, or ``embedding`` to exercise embed. For the
+``converse`` API, pass ``converse_script`` — a list of pre-canned
+responses, one per call, so a test can script a multi-round
+tool-call dance.
 """
 from __future__ import annotations
 
@@ -19,7 +25,8 @@ class _MockBedrockBody(object):
 
 
 class MockBedrockClient(object):
-    """Mocks ``boto3.client('bedrock-runtime')`` for ``invoke_model``."""
+    """Mocks ``boto3.client('bedrock-runtime')`` for ``invoke_model``
+    and ``converse``."""
 
     def __init__(
         self,
@@ -30,8 +37,10 @@ class MockBedrockClient(object):
         legacy_completion: Optional[str] = None,
         titan_results: Optional[List[str]] = None,
         embedding: Optional[List[float]] = None,
+        converse_script: Optional[List[Any]] = None,
     ):
         self.calls: List[Dict[str, Any]] = []
+        self.converse_calls: List[Dict[str, Any]] = []
         self._content = content
         self._usage = usage or {'input': 9, 'output': 4}
         self._raise = raise_exc
@@ -39,6 +48,8 @@ class MockBedrockClient(object):
         self._legacy_completion = legacy_completion
         self._titan_results = titan_results
         self._embedding = embedding
+        self._converse_script = list(converse_script) if converse_script is not None else None
+        self._converse_index = 0
 
     def invoke_model(
         self,
@@ -83,3 +94,78 @@ class MockBedrockClient(object):
             }
 
         return {'body': _MockBedrockBody(json.dumps(payload).encode('utf-8'))}
+
+    def converse(
+        self,
+        modelId: str,
+        messages: list,
+        system: list,
+        toolConfig: dict,
+    ):
+        call = {
+            'modelId': modelId,
+            'messages': messages,
+            'system': system,
+            'toolConfig': toolConfig,
+        }
+        self.converse_calls.append(call)
+        if self._raise is not None:
+            raise self._raise
+        if self._converse_script is None:
+            # Default: terminal end_turn message with no tool use.
+            return {
+                'output': {
+                    'message': {
+                        'role': 'assistant',
+                        'content': [{'text': self._content}],
+                    }
+                },
+                'stopReason': 'end_turn',
+            }
+        if self._converse_index >= len(self._converse_script):
+            raise AssertionError(
+                'MockBedrockClient converse_script exhausted; '
+                'add more entries or shorten the test loop.'
+            )
+        scripted = self._converse_script[self._converse_index]
+        self._converse_index += 1
+        return scripted
+
+
+def make_bedrock_tool_use_response(
+    *,
+    name: str,
+    tool_input: dict,
+    tool_use_id: str = 'tu_1',
+):
+    """Build a Converse response whose content carries a single
+    ``toolUse`` block (with ``stopReason='tool_use'``). Public so test
+    files can script a multi-round tool-call dance."""
+    return {
+        'output': {
+            'message': {
+                'role': 'assistant',
+                'content': [
+                    {'toolUse': {
+                        'name': name,
+                        'input': tool_input,
+                        'toolUseId': tool_use_id,
+                    }},
+                ],
+            }
+        },
+        'stopReason': 'tool_use',
+    }
+
+
+def make_bedrock_end_turn_response(text: str = 'final'):
+    """Build a Converse response with a terminal ``end_turn`` message."""
+    return {
+        'output': {
+            'message': {
+                'role': 'assistant',
+                'content': [{'text': text}],
+            }
+        },
+        'stopReason': 'end_turn',
+    }

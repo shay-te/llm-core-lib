@@ -44,7 +44,7 @@ That string flows through `agent-core-lib` and ends up in the prepared
 | Helper                                                  | Produces                                                          |
 | ------------------------------------------------------- | ----------------------------------------------------------------- |
 | `agent_prompt_utils.security_guardrails_text()`         | Pure guardrails text block on credential / inspection safety.     |
-| `credential_scan.scan_text_for_credentials_and_phishing(text, *, logger, context_label)` | Detective-only WARNING log; does NOT block. Run AFTER the agent runs, not before the LLM call. |
+| `pii_core_lib.credential_scan.scan_text_for_credentials_and_phishing(text, *, logger, context_label)` | Detective-only WARNING log; does NOT block. Run AFTER the agent runs, not before the LLM call. In this repo's safety gate it's exposed as `audit_credentials(text, audit_logger=..., context=...)` so callers stay agent-free. |
 
 ### 1.3 AGENTS.md / architecture / lessons rendering
 

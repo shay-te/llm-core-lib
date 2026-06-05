@@ -69,16 +69,6 @@ class OpenAiConnectionFactory(ConnectionFactory):
             self._temperature,
         )
 
-    def raw_client(self) -> Any:
-        """Return the shared underlying ``openai.OpenAI`` client.
-
-        Escape hatch for callers that need provider-native features the
-        normalized connection surface intentionally does not cover —
-        e.g. the OpenAI Responses API with tool/function calling. Prefer
-        ``get()`` + ``complete_text`` / ``embed`` for ordinary use.
-        """
-        return self._client
-
     @staticmethod
     def _build_client(config: DictConfig) -> Any:
         # Integration-only path; unit tests inject ``client`` so the

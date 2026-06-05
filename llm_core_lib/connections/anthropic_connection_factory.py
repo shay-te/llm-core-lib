@@ -64,16 +64,6 @@ class AnthropicConnectionFactory(ConnectionFactory):
             self._temperature,
         )
 
-    def raw_client(self) -> Any:
-        """Return the shared underlying ``anthropic.Anthropic`` client.
-
-        Escape hatch for callers that need provider-native features the
-        normalized connection surface intentionally does not cover —
-        e.g. the Messages API with tool use. Prefer ``get()`` +
-        ``complete_text`` for ordinary use.
-        """
-        return self._client
-
     @staticmethod
     def _build_client(config: DictConfig) -> Any:
         # Integration-only path; unit tests inject ``client``.
