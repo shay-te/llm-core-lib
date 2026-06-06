@@ -21,10 +21,20 @@ from llm_core_lib.safety.payload_gate import scrub_history_for_llm
 
 # Host can override via constructor (typically from
 # ``core_lib.llm.max_chat_history`` / ``...max_chat_tokens``).
-DEFAULT_MAX_CHAT_HISTORY = 50
-# 0 disables the token cap (message-count cap still applies). 12000
-# leaves headroom for completion on a 16k-context model.
-DEFAULT_MAX_CHAT_TOKENS = 12000
+#
+# Defaults are sized for SMALL MODELS (8k-context tier such as
+# gpt-4o-mini, Bedrock Haiku). On 8k-context, the budget needs to hold:
+# the system prompt (~1k), tool schemas (~2k), the latest tool result
+# (up to ~2k for a 20-row user list), the user message, and headroom
+# for the assistant's completion. That leaves only ~2k for prior turns
+# — so the message-count cap is set low (20 turns × ~100 tokens
+# average ≈ 2k) and the post-fetch token cap is set as a hard floor.
+# Hosts on 32k+ models can raise via the constructor / yaml.
+DEFAULT_MAX_CHAT_HISTORY = 20
+# 0 disables the token cap (message-count cap still applies). 4000 is
+# the small-model floor: leaves room for system + tools + tool result
+# + completion inside an 8k window.
+DEFAULT_MAX_CHAT_TOKENS = 4000
 
 
 class ChatSessionNotFound(LookupError):
@@ -78,9 +88,22 @@ class ChatSession(object):
             scope_meta_data=scope_meta_data,
         )
 
-    def run_command(self, hash_id: str, command: str) -> str:
+    def run_command(
+        self,
+        hash_id: str,
+        command: str,
+        tools: Optional[list] = None,
+    ) -> str:
         """Drive one turn; persist user prompt + every loop message;
-        return assistant text."""
+        return assistant text.
+
+        ``tools`` overrides the constructor-default tool list for this
+        turn only — the caller passes the per-user filtered subset so
+        the LLM never sees tools the session admin has no module
+        permission for. ``None`` (the default) falls back to the
+        full list registered at construction, preserving the
+        single-tenant / unfiltered flow used by older tests.
+        """
         conversation = self._history_store.conversation_by_hash(hash_id)
         if conversation is None:
             raise ChatSessionNotFound(f'no conversation for hash_id={hash_id!r}')
@@ -126,7 +149,7 @@ class ChatSession(object):
         with self._connection_factory.get() as connection:
             chat_kwargs = dict(
                 input_messages=scrubbed_for_llm,
-                tools=self._tools,
+                tools=tools if tools is not None else self._tools,
                 instructions=self._instructions,
                 invoke_tool=self._invoke_tool,
                 logger=self._logger,
