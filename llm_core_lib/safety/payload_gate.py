@@ -40,7 +40,7 @@ from pii_core_lib.credential_scan import scan_text_for_credentials_and_phishing
 from pii_core_lib.pii_patterns import PIIPatternFinding
 from pii_core_lib.data_layers.service.pii_service import PiiService
 
-from llm_core_lib.safety.llm_view import LLMView
+from llm_core_lib.safety.llm_view import LLMView, RefLLMView
 
 
 # Module-level singleton. ``PiiService`` is stateless — every method
@@ -50,24 +50,27 @@ _PII_SERVICE = PiiService()
 
 
 class UnsafeToolResultError(StatusCodeException):
-    """A tool returned a non-:class:`LLMView` shape to the LLM.
+    """A tool returned a non-:class:`RefLLMView` shape to the LLM.
 
-    HTTP 500 — server-side contract violation by the tool author. The
-    web layer's ``@HandleException`` maps it to a 500 response; the
-    chat loop's ``run_tool`` separately catches it and emits the
-    sanitized envelope (so the type-name detail in the message never
-    reaches the model either).
+    HTTP 500 — server-side contract violation. The web layer's
+    ``@HandleException`` maps to 500; the chat loop's ``run_tool``
+    catches and emits the sanitized envelope so the type-name never
+    reaches the model.
     """
 
     def __init__(self, message: str) -> None:
         super().__init__(HTTPStatus.INTERNAL_SERVER_ERROR, message)
 
 
-def _ensure_llm_view(item: Any) -> None:
-    if not isinstance(item, LLMView):
+def _ensure_ref_llm_view(item: Any) -> None:
+    # Strict: ONLY RefLLMView (or its subclasses) may cross the model
+    # boundary. Plain ``LLMView`` carrying entity data — name, email,
+    # status — is rejected. Tools must project to ``RefLLMView`` (ids
+    # only) and rely on the render path's hydration for display.
+    if not isinstance(item, RefLLMView):
         raise UnsafeToolResultError(
             f'tool returned {type(item).__name__} to the LLM; '
-            f'tool results must be LLMView subclasses.'
+            f'tool results must be RefLLMView subclasses.'
         )
 
 
@@ -83,10 +86,10 @@ def _project(result: Any) -> Any:
     if isinstance(result, list):
         dumped_items = []
         for item in result:
-            _ensure_llm_view(item)
+            _ensure_ref_llm_view(item)
             dumped_items.append(item.model_dump())
         return dumped_items
-    _ensure_llm_view(result)
+    _ensure_ref_llm_view(result)
     return result.model_dump()
 
 
@@ -98,9 +101,10 @@ def to_llm_payload(
 ) -> Any:
     """Project a tool's return into an LLM-safe JSON shape + scrub PII.
 
-    Accepts an :class:`LLMView` (returns dict) or a list of
-    :class:`LLMView` (returns list of dicts). ``None`` passes through.
-    Anything else raises :class:`UnsafeToolResultError`.
+    Accepts a :class:`RefLLMView` (returns dict) or a list of
+    :class:`RefLLMView` (returns list of dicts). ``None`` passes
+    through. Anything else (plain ``LLMView`` with entity data, dict,
+    list of dicts, primitives) raises :class:`UnsafeToolResultError`.
 
     After the allowlist projection, the result is passed through
     :meth:`PiiService.scrub` so any free-text PII inside allowlisted
