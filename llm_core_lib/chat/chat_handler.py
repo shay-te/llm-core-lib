@@ -38,8 +38,11 @@ class ChatHandler(ABC):
         input_messages_before: List[Dict[str, Any]],
         final_messages: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        # Length-based slice for most providers; the hook lets a
-        # provider that rewrites the head recover the right suffix.
+        # ``input_messages_before`` is the exact pre-call snapshot
+        # the session sent to the connection; ``final_messages`` is
+        # what the connection returned (typically the same list with
+        # new items appended). Length-based slicing works for both
+        # current providers.
         ...
 
     @abstractmethod

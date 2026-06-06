@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from llm_core_lib.chat.chat_handler import ChatHandler
 from llm_core_lib.chat.chat_handler_registry import ChatHandlerRegistry
 from llm_core_lib.chat.chat_history_store import ChatHistoryStore, SENDER_USER
 from llm_core_lib.chat.history_budget import truncate_to_token_budget
@@ -119,10 +118,10 @@ class ChatSession(object):
         # stays raw — admins legitimately type PII to look users up.
         # Storage stays raw too; the scrub is read-path only.
         scrubbed_for_llm = scrub_history_for_llm(bounded)
-        # Snapshot AFTER truncation+scrub — the connection mutates
-        # ``scrubbed_for_llm`` in place and ``final_messages`` is
-        # that same list. The diff is the tail past this length.
-        prefix_len = len(scrubbed_for_llm)
+        # Snapshot the EXACT list the connection will see, so the
+        # handler's diff has the true "before" image — even if a
+        # future connection rewrites the head in place.
+        sent_to_connection = list(scrubbed_for_llm)
 
         with self._connection_factory.get() as connection:
             chat_kwargs = dict(
@@ -136,14 +135,11 @@ class ChatSession(object):
                 chat_kwargs['max_tool_call_rounds'] = self._max_tool_call_rounds
             response, final_messages = connection.chat_with_tools(**chat_kwargs)
 
-        # Persist everything the loop added on top of our snapshot.
-        # The diff slice MUST come from the list the connection
-        # actually mutated (``scrubbed_for_llm`` == ``final_messages``),
-        # not from the pre-truncation raw list, so handlers that
-        # inspect content (rather than just length) get the right
-        # window.
+        # Diff against the snapshot (not against a slice of the
+        # post-call list — that would lie if the connection ever
+        # rewrites the head).
         new_messages = handler.diff_new_messages(
-            input_messages_before=final_messages[:prefix_len],
+            input_messages_before=sent_to_connection,
             final_messages=final_messages,
         )
         for message in new_messages:

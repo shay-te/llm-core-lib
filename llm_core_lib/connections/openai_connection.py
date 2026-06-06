@@ -208,6 +208,7 @@ class OpenAiConnection(Connection):
                 )
                 return response, input_messages
             next_input_messages = None
+            pending_message_items = []
             for item in response.output:
                 if item.type == 'function_call':
                     effective_logger.debug('tool call: %r', item.name)
@@ -216,15 +217,19 @@ class OpenAiConnection(Connection):
                     )
                     break
                 if item.type == 'message':
-                    # Append the terminal assistant message to the
-                    # input list so downstream persistence sees it as
-                    # part of the turn's diff. Without this the reply
-                    # text is in ``response.output`` only and history
-                    # round-trips lose the assistant turn.
-                    input_messages.append(_item_to_dict(item))
+                    # Stash; only append if this round terminates.
+                    # Appending unconditionally would mix a stray
+                    # assistant message into the input list when a
+                    # function_call follows in the same output.
+                    pending_message_items.append(_item_to_dict(item))
                 else:
-                    effective_logger.debug('unknown response item type: %r', item.type)
+                    effective_logger.info('unknown response item type: %r', item.type)
             if next_input_messages is None:
+                # Terminal round — persist the assistant message(s) so
+                # downstream history sees the reply (without this the
+                # text is only in ``response.output``).
+                for message_item in pending_message_items:
+                    input_messages.append(message_item)
                 return response, input_messages
             input_messages = next_input_messages
         effective_logger.warning(
