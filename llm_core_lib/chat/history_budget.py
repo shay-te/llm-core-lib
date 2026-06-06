@@ -38,7 +38,7 @@ def truncate_to_token_budget(
     it alone exceeds the budget — the current user prompt must
     reach the LLM regardless of history cost.
     """
-    if not messages or max_tokens <= 0:
+    if not messages or max_tokens is None or max_tokens <= 0:
         return list(messages)
     tail = messages[-1]
     kept_reversed = [tail]
