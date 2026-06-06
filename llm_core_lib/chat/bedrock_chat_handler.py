@@ -1,9 +1,7 @@
 """Bedrock Converse-API chat handler.
 
-Bedrock's input shape differs from OpenAI's: messages are
-``{'role': 'user'|'assistant', 'content': [<blocks>]}`` where each
-block is a ``{'text': ...}``, ``{'toolUse': ...}``, or
-``{'toolResult': ...}`` dict. Stored verbatim (no normalisation).
+Messages are ``{'role', 'content': [<blocks>]}`` where each block is
+``{'text'}``, ``{'toolUse'}``, or ``{'toolResult'}``. Stored verbatim.
 """
 from __future__ import annotations
 
@@ -22,7 +20,6 @@ KIND_BEDROCK = 'main_chat_bedrock'
 
 
 class BedrockChatHandler(ChatHandler):
-    """Handles the Bedrock Converse messages-list shape."""
 
     KIND = KIND_BEDROCK
 
@@ -45,9 +42,8 @@ class BedrockChatHandler(ChatHandler):
         if not isinstance(content, list):
             return self.truncate_summary(json.dumps(message, default=str))
 
-        # A single message can carry text + a toolUse block at once
-        # (Bedrock's assistant turn shape). The summary prefers the
-        # text; if absent, names the tool.
+        # One message can carry text + toolUse together (assistant
+        # turn shape). Prefer text; fall back to tool name / result.
         text_parts = []
         tool_use_names = []
         tool_result_summary = None
@@ -61,7 +57,6 @@ class BedrockChatHandler(ChatHandler):
                 tool_use_names.append(str(tool_use.get('name') or '?'))
             tool_result = block.get('toolResult')
             if isinstance(tool_result, dict):
-                # toolResult.content is a list of text blocks too.
                 inner = tool_result.get('content') or []
                 texts = [
                     part.get('text', '') for part in inner
@@ -87,21 +82,14 @@ class BedrockChatHandler(ChatHandler):
         return ''
 
     def sender_for(self, message: Dict[str, Any]) -> str:
-        role = message.get('role')
         content = message.get('content') or []
-        # Bedrock's "user" follow-up that carries a toolResult is the
-        # tool plumbing — classify as SENDER_TOOL even though the
-        # protocol role is 'user'.
+        # Bedrock's "user"-role follow-up carrying toolResult is tool
+        # plumbing, not user input — classify accordingly.
         if isinstance(content, list) and any(
-            isinstance(block, dict) and 'toolResult' in block
-            for block in content
+            isinstance(b, dict) and ('toolResult' in b or 'toolUse' in b)
+            for b in content
         ):
             return SENDER_TOOL
-        if isinstance(content, list) and any(
-            isinstance(block, dict) and 'toolUse' in block
-            for block in content
-        ):
-            return SENDER_TOOL
-        if role == 'assistant':
+        if message.get('role') == 'assistant':
             return SENDER_ASSISTANT
         return SENDER_USER

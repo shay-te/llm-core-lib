@@ -19,21 +19,10 @@ from llm_core_lib.chat.history_budget import truncate_to_token_budget
 from llm_core_lib.safety.payload_gate import scrub_history_for_llm
 
 
-# Host can override via constructor (typically from
-# ``core_lib.llm.max_chat_history`` / ``...max_chat_tokens``).
-#
-# Defaults are sized for SMALL MODELS (8k-context tier such as
-# gpt-4o-mini, Bedrock Haiku). On 8k-context, the budget needs to hold:
-# the system prompt (~1k), tool schemas (~2k), the latest tool result
-# (up to ~2k for a 20-row user list), the user message, and headroom
-# for the assistant's completion. That leaves only ~2k for prior turns
-# — so the message-count cap is set low (20 turns × ~100 tokens
-# average ≈ 2k) and the post-fetch token cap is set as a hard floor.
-# Hosts on 32k+ models can raise via the constructor / yaml.
+# Defaults sized for 8k-context models (system prompt + tool schemas
+# + tool results + completion eat most of the window). Raise via
+# constructor / yaml on bigger models. 0 disables the token cap.
 DEFAULT_MAX_CHAT_HISTORY = 20
-# 0 disables the token cap (message-count cap still applies). 4000 is
-# the small-model floor: leaves room for system + tools + tool result
-# + completion inside an 8k window.
 DEFAULT_MAX_CHAT_TOKENS = 4000
 
 
@@ -97,33 +86,27 @@ class ChatSession(object):
         """Drive one turn; persist user prompt + every loop message;
         return assistant text.
 
-        ``tools`` overrides the constructor-default tool list for this
-        turn only — the caller passes the per-user filtered subset so
-        the LLM never sees tools the session admin has no module
-        permission for. ``None`` (the default) falls back to the
-        full list registered at construction, preserving the
-        single-tenant / unfiltered flow used by older tests.
+        ``tools`` overrides the constructor list for this turn (host
+        passes per-user filtered subset). ``None`` uses the full list
+        registered at construction.
         """
         conversation = self._history_store.conversation_by_hash(hash_id)
         if conversation is None:
             raise ChatSessionNotFound(f'no conversation for hash_id={hash_id!r}')
-        kind = conversation.get('kind')
-        handler = self._handler_registry.get(kind)
+        handler = self._handler_registry.get(conversation.get('kind'))
         conversation_id = conversation['id']
 
         history = self._history_store.list_recent_messages(
             conversation_id, self._max_chat_history,
         )
-        # Rebuild the provider-shape input list from stored meta_data.
         input_messages: List[Dict[str, Any]] = [
             handler.stored_to_input_message(message['meta_data'])
             for message in history
         ]
-        # Append the new user prompt (also persisted below).
         user_prompt_msg = handler.build_user_prompt(command)
         input_messages.append(user_prompt_msg)
-        # Persist the user prompt BEFORE calling the LLM so a crash
-        # mid-turn still leaves the user's last command recoverable.
+        # Persist BEFORE the LLM call so a mid-turn crash still leaves
+        # the user's prompt recoverable.
         self._history_store.append_message(
             conversation_id,
             sender=SENDER_USER,
@@ -131,19 +114,13 @@ class ChatSession(object):
             meta_data=user_prompt_msg,
         )
 
-        # Token-budget truncation first — drops oldest messages
-        # until the input list fits ``max_chat_tokens``. The
-        # message-count cap already bounded the fetch; this is the
-        # safety net for "50 messages but each one is huge".
         bounded = truncate_to_token_budget(input_messages, self._max_chat_tokens)
-        # Scrub PII out of prior-turn messages before re-sending to
-        # the LLM. The last message (the just-built user prompt)
-        # stays raw — admins legitimately type PII to look users up.
-        # Storage stays raw too; the scrub is read-path only.
+        # Scrub prior-turn PII (read-path only; storage stays raw so
+        # admins see what they typed). The current prompt is the last
+        # item and stays raw — admins legitimately look users up by PII.
         scrubbed_for_llm = scrub_history_for_llm(bounded)
-        # Snapshot the EXACT list the connection will see, so the
-        # handler's diff has the true "before" image — even if a
-        # future connection rewrites the head in place.
+        # Snapshot the exact list the connection will see — the
+        # handler's diff needs the true "before" image.
         sent_to_connection = list(scrubbed_for_llm)
 
         with self._connection_factory.get() as connection:
@@ -158,9 +135,6 @@ class ChatSession(object):
                 chat_kwargs['max_tool_call_rounds'] = self._max_tool_call_rounds
             response, final_messages = connection.chat_with_tools(**chat_kwargs)
 
-        # Diff against the snapshot (not against a slice of the
-        # post-call list — that would lie if the connection ever
-        # rewrites the head).
         new_messages = handler.diff_new_messages(
             input_messages_before=sent_to_connection,
             final_messages=final_messages,

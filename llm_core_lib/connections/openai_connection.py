@@ -25,13 +25,11 @@ DEFAULT_MAX_TOOL_CALL_ROUNDS = 100
 
 
 def _item_to_dict(item: Any) -> Dict[str, Any]:
-    """Convert a Responses-API output item to a plain dict.
+    """Convert a Responses-API output item (Pydantic) to a plain dict.
 
-    OpenAI's SDK returns Pydantic-shaped objects; downstream chat
-    handlers and the JSON storage column both need real dicts.
-    Tries ``model_dump`` (Pydantic v2), then ``dict``, then ``vars``,
-    then returns the object unchanged so dict inputs (tests) pass
-    through.
+    Downstream chat handlers and the JSON storage column need dicts.
+    Tries ``model_dump`` → ``dict`` → ``vars`` → identity (so tests
+    that already pass dicts round-trip).
     """
     if isinstance(item, dict):
         return item
@@ -158,36 +156,14 @@ class OpenAiConnection(Connection):
         max_tool_call_rounds: int = DEFAULT_MAX_TOOL_CALL_ROUNDS,
         logger: Optional[logging.Logger] = None,
     ) -> Tuple[Any, list]:
-        """Multi-round OpenAI Responses tool-call loop.
+        """Multi-round OpenAI Responses tool-call loop. Iterative;
+        capped at ``max_tool_call_rounds``.
 
-        Each round either produces a ``function_call`` (we run it via
-        ``invoke_tool`` and feed the result back) or a terminal
-        ``message`` (we return). Iterative — never recursive — so a
-        long tool sequence cannot exhaust the Python stack. Capped at
-        ``max_tool_call_rounds``.
-
-        Args:
-            input_messages: Responses-API input list. The caller owns
-                building the initial user message; the loop appends
-                function_call items and function_call_output items as
-                rounds progress.
-            tools: OpenAI function-tool schema.
-            instructions: Responses-API ``instructions`` string.
-            invoke_tool: callback ``(name, kwargs) -> result``. The
-                caller's choke point — authorization, gate, scrub,
-                sanitized errors all live there. ``result`` is
-                ``str``-encoded before being fed back to the model so
-                even dict / list returns survive the round trip.
-            max_tool_call_rounds: hard cap. Hit-the-cap logs WARNING
-                and returns the in-flight response.
-            logger: destination for round-level debug lines. Defaults
-                to the connection module's logger.
-
-        Returns:
-            ``(response, input_messages)`` — the final response object
-            (terminal ``message`` or the in-flight one if the cap was
-            hit) and the final messages list (caller may persist it
-            for the next conversation turn).
+        ``input_messages`` is mutated in place — function_call,
+        function_call_output, and terminal assistant message items are
+        all appended as the loop progresses. ``invoke_tool`` is the
+        caller's choke point (auth + gate + scrub + sanitized errors).
+        Returns ``(response, input_messages)``.
         """
         effective_logger = logger or logging.getLogger(__name__)
         last_response: Any = None
@@ -217,17 +193,13 @@ class OpenAiConnection(Connection):
                     )
                     break
                 if item.type == 'message':
-                    # Stash; only append if this round terminates.
-                    # Appending unconditionally would mix a stray
-                    # assistant message into the input list when a
-                    # function_call follows in the same output.
+                    # Stash; only commit on terminal rounds so a
+                    # mid-round message doesn't get mixed with a
+                    # function_call from the same output.
                     pending_message_items.append(_item_to_dict(item))
                 else:
                     effective_logger.info('unknown response item type: %r', item.type)
             if next_input_messages is None:
-                # Terminal round — persist the assistant message(s) so
-                # downstream history sees the reply (without this the
-                # text is only in ``response.output``).
                 for message_item in pending_message_items:
                     input_messages.append(message_item)
                 return response, input_messages
@@ -240,16 +212,12 @@ class OpenAiConnection(Connection):
 
     @staticmethod
     def _run_function_call(item: Any, input_messages: list, invoke_tool: Callable[[str, dict], Any]) -> list:
-        """Run one ``function_call`` item via ``invoke_tool`` and
-        append the call + result onto ``input_messages``.
+        """Run one ``function_call`` item, append the call + result
+        onto ``input_messages``, return the mutated list.
 
-        The Responses-API delivers ``item.arguments`` as a JSON string;
-        we parse it into a dict here so the caller's ``invoke_tool``
-        always receives real Python kwargs. Malformed JSON and
-        non-string / non-dict argument values fall back to an empty
-        dict (load-bearing — invoke_tool still runs, and the host's
-        own normalisation can take over). Returns the mutated
-        ``input_messages`` so the loop can re-bind it.
+        ``item.arguments`` arrives as a JSON string; parsed to a dict
+        here so invoke_tool gets real kwargs. Malformed JSON falls
+        back to ``{}`` (invoke_tool still runs).
         """
         raw_args = getattr(item, 'arguments', None)
         if isinstance(raw_args, str):
@@ -262,11 +230,7 @@ class OpenAiConnection(Connection):
         else:
             parsed_args = {}
         result = invoke_tool(item.name, parsed_args)
-        # Normalize to a plain dict so downstream JSON storage and
-        # the chat handlers' ``message.get(...)`` accesses work
-        # uniformly. The SDK returns Pydantic objects whose attribute
-        # access (``item.type``) is fine in this module but breaks
-        # the dict-based contract everywhere else.
+        # Dict-normalise so storage + chat handlers' ``.get(...)`` work.
         input_messages.append(_item_to_dict(item))
         input_messages.append({
             'type': 'function_call_output',
