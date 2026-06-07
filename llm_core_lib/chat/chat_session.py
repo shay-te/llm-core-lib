@@ -337,6 +337,9 @@ class ChatSession(object):
         role = replay_msg.get('role')
         text = replay_msg.get('text') or ''
         if role == _REPLAY_ROLE_USER:
+            # Drop empty user entries — providers reject empty content.
+            if not text:
+                return None
             return {'role': _REPLAY_ROLE_USER, 'content': text}
         if role == _REPLAY_ROLE_ASSISTANT:
             llm_payload = replay_msg.get('llm_payload') or {}
@@ -350,6 +353,10 @@ class ChatSession(object):
                 content = f'{text}\n\n[Tool results: {payload_str}]' if text else f'[Tool results: {payload_str}]'
             else:
                 content = text
+            # Drop turns where the assistant had nothing — no text AND
+            # no payload — same reason: empty content gets rejected.
+            if not content:
+                return None
             return {'role': _REPLAY_ROLE_ASSISTANT, 'content': content}
         # Tool role + anything unknown → drop. See docstring.
         return None
