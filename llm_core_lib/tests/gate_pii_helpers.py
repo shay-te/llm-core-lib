@@ -15,19 +15,17 @@ This module has no ``test_`` prefix on purpose; the discoverers skip it.
 """
 from __future__ import annotations
 
-from llm_core_lib.safety.llm_view import LLMView
+from llm_core_lib.safety.llm_view import RefLLMView
 
 
-class CommentStubLLMView(LLMView):
-    """LLMView whose allowlisted shape exposes a free-text ``comment``.
+class CommentStubLLMView(RefLLMView):
+    """RefLLMView marker subclass that exercises the in-payload PII scrub.
 
-    The gate's projection step accepts the view (it's an LLMView
-    subclass) and emits ``{'id': ..., 'comment': ...}``. The gate's
-    scrub step then walks the projected dict and rewrites any PII it
-    finds inside the comment text. Together they make this fixture
-    the minimal case the gate is designed for: a typed allowlist that
-    still has at least one free-text field a tool author might
-    accidentally fill with user PII.
+    Inherits the RefLLMView marker so the strict gate accepts it.
+    Carries a free-text ``comment`` field so the gate's scrub step
+    has something to walk into — the fixture's job is to verify that
+    PII in any allowlisted free-text field is rewritten before the
+    LLM sees it.
     """
 
     def __init__(self, id, comment):

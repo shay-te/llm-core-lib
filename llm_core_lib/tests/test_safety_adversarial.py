@@ -32,7 +32,7 @@ import unittest
 # StatusCodeException base resolves without the framework installed.
 import llm_core_lib.tests  # noqa: F401
 
-from llm_core_lib.safety.llm_view import LLMView
+from llm_core_lib.safety.llm_view import RefLLMView
 from llm_core_lib.safety.payload_gate import (
     UnsafeToolResultError,
     new_error_ref,
@@ -42,7 +42,7 @@ from llm_core_lib.safety.payload_gate import (
 )
 
 
-class _UserView(LLMView):
+class _UserView(RefLLMView):
     """Stdlib subclass of the transport marker — the gate only sees
     ``isinstance(item, LLMView)`` and ``item.model_dump()``, so this
     minimal class is enough to exercise every gate-behavior probe.
@@ -305,7 +305,7 @@ class TestNoLeakRoundTrip(unittest.TestCase):
         # ``self.email = ...`` in ``__init__``), ``model_dump`` should
         # return only what the subclass chooses to return — the marker
         # imposes no constraint.
-        class _LooseView(LLMView):
+        class _LooseView(RefLLMView):
             def __init__(self):
                 self.id = 'u1'
                 self.display_name = 'Jane'

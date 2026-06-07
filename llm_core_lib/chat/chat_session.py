@@ -58,6 +58,11 @@ DEFAULT_MAX_CHAT_TOKENS = 4000
 # arguing over them.
 META_KEY_REFS = 'refs'
 META_KEY_LLM_PAYLOAD = 'llm_payload'
+
+# Cap how much JSON-encoded llm_payload may inflate a replayed assistant
+# turn — without this, multi-turn conversations over large id lists
+# silently blow past the token budget.
+_REPLAY_PAYLOAD_MAX_CHARS = 1200
 _PERSISTENCE_ONLY_META_KEYS = (META_KEY_REFS, META_KEY_LLM_PAYLOAD)
 
 
@@ -336,10 +341,12 @@ class ChatSession(object):
         if role == _REPLAY_ROLE_ASSISTANT:
             llm_payload = replay_msg.get('llm_payload') or {}
             if llm_payload:
-                # Compact JSON — small + stable + the model parses it
-                # cleanly. Newline separator keeps the prose tier
-                # readable in the model's "thought" trace.
                 payload_str = json.dumps(llm_payload, sort_keys=True)
+                # Cap injected payload so long-list turns can't inflate
+                # next-turn context past the token budget; truncation
+                # mark tells the model the list was bigger than shown.
+                if len(payload_str) > _REPLAY_PAYLOAD_MAX_CHARS:
+                    payload_str = payload_str[:_REPLAY_PAYLOAD_MAX_CHARS] + '…(truncated)'
                 content = f'{text}\n\n[Tool results: {payload_str}]' if text else f'[Tool results: {payload_str}]'
             else:
                 content = text

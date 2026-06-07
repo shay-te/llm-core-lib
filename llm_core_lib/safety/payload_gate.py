@@ -244,6 +244,27 @@ def sanitized_error_payload(ref: str) -> dict:
     }
 
 
+def scrub_user_error_payload(
+    detail: str,
+    *,
+    audit_logger: Optional[logging.Logger] = None,
+    context: str = 'user-visible tool error',
+) -> dict:
+    """Curated tool-error envelope, scrubbed for PII.
+
+    ``LLMUserError`` carries human-readable detail (e.g. "No user found
+    with email <email>") that the LLM needs verbatim to re-prompt — but
+    the email itself must NOT cross the model boundary. Run the PII
+    scrub on the detail before wrapping into the envelope.
+    """
+    scrubbed = _PII_SERVICE.scrub(
+        {'status': 'invalid_input', 'detail': str(detail)},
+        audit_logger=audit_logger,
+        context=context,
+    )
+    return scrubbed
+
+
 def run_tool(
     fn: Callable[..., Any],
     *args: Any,

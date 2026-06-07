@@ -23,7 +23,7 @@ from http import HTTPStatus
 
 from core_lib.error_handling.status_code_exception import StatusCodeException
 
-from llm_core_lib.safety.llm_view import LLMView
+from llm_core_lib.safety.llm_view import RefLLMView
 from llm_core_lib.safety.payload_gate import (
     UnsafeToolResultError,
     run_tool,
@@ -53,7 +53,7 @@ def _assert_no_email_or_ssn(test_case, payload):
     )
 
 
-class _UserLLMView(LLMView):
+class _UserLLMView(RefLLMView):
     """Stdlib subclass of the transport-layer marker — the gate's
     ``isinstance(item, LLMView)`` check passes, and ``model_dump``
     returns a JSON-safe dict. The Pydantic-flavored equivalent
