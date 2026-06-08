@@ -39,7 +39,6 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
             },
         }
         core = LlmCoreLib(cfg)
-        self.assertTrue(core.registry.has('openai-default'))
         factory = core.registry.get('openai-default')
         self.assertIsInstance(factory, OpenAiConnectionFactory)
 
@@ -124,7 +123,7 @@ class TestLlmCoreLibBootstrap(unittest.TestCase):
             ),
         )
         core = LlmCoreLib(cfg)
-        self.assertTrue(core.registry.has('a'))
+        self.assertEqual([c.id for c in core.registry.list()], ['a'])
 
     def test_connections_set_to_none_is_tolerated(self):
         # `connections: null` (or missing the key) must not raise.

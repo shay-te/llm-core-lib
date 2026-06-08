@@ -48,12 +48,6 @@ class TestChatHandlerRegistry(unittest.TestCase):
         registry.register(handler)
         self.assertIs(registry.get('stub-kind'), handler)
 
-    def test_has_reports_presence(self):
-        registry = ChatHandlerRegistry()
-        self.assertFalse(registry.has('stub-kind'))
-        registry.register(_Stub())
-        self.assertTrue(registry.has('stub-kind'))
-
     def test_get_unknown_kind_raises_with_available_list(self):
         registry = ChatHandlerRegistry()
         registry.register(_Stub())
@@ -79,20 +73,6 @@ class TestChatHandlerRegistry(unittest.TestCase):
         registry.register(first)
         registry.register(second)
         self.assertIs(registry.get('stub-kind'), second)
-
-    def test_kinds_returns_sorted_list(self):
-        registry = ChatHandlerRegistry()
-
-        class _A(_Stub):
-            KIND = 'zebra'
-
-        class _B(_Stub):
-            KIND = 'apple'
-
-        registry.register(_A())
-        registry.register(_B())
-        self.assertEqual(registry.kinds(), ['apple', 'zebra'])
-
 
 if __name__ == '__main__':
     unittest.main()

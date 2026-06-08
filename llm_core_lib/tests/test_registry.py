@@ -51,28 +51,11 @@ class TestRegistryHappyPath(unittest.TestCase):
         self.assertIsInstance(factory, ConnectionFactory)
         self.assertIsInstance(factory, OpenAiConnectionFactory)
 
-    def test_has_reports_membership(self):
-        self.assertFalse(self.registry.has('x'))
-        self.registry.register(_ok_openai('x'))
-        self.assertTrue(self.registry.has('x'))
-
     def test_list_returns_configs_in_order(self):
         self.registry.register(_ok_openai('a'))
         self.registry.register(_ok_openai('b'))
         ids = [c.id for c in self.registry.list()]
         self.assertEqual(ids, ['a', 'b'])
-
-    def test_unregister_removes(self):
-        self.registry.register(_ok_openai('z'))
-        self.registry.unregister('z')
-        self.assertFalse(self.registry.has('z'))
-
-    def test_clear_drops_everything(self):
-        self.registry.register(_ok_openai('a'))
-        self.registry.register(_ok_openai('b'))
-        self.registry.clear()
-        self.assertEqual(self.registry.list(), [])
-        self.assertFalse(self.registry.has('a'))
 
     def test_get_returns_cached_factory_instance(self):
         # Two get() calls return the same factory — build happens
@@ -99,10 +82,6 @@ class TestRegistryErrors(unittest.TestCase):
     def test_get_missing_raises(self):
         with self.assertRaises(LlmMissingConnectionError):
             self.registry.get('nope')
-
-    def test_unregister_missing_raises(self):
-        with self.assertRaises(LlmMissingConnectionError):
-            self.registry.unregister('nope')
 
     def test_bad_provider_propagates_invalid_provider(self):
         with self.assertRaises(LlmInvalidProviderError):

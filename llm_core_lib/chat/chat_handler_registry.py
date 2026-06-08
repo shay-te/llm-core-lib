@@ -35,9 +35,3 @@ class ChatHandlerRegistry(object):
                 f'available={sorted(self._by_kind)}'
             )
         return handler
-
-    def has(self, kind: str) -> bool:
-        return kind in self._by_kind
-
-    def kinds(self) -> list:
-        return sorted(self._by_kind)

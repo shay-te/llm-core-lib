@@ -53,14 +53,6 @@ class LlmConnectionRegistry(object):
         self._configs[config.id] = config
         self._factories[config.id] = factory
 
-    def unregister(self, connection_id: str) -> None:
-        if connection_id not in self._configs:
-            raise LlmMissingConnectionError(
-                f'connection {connection_id!r} not registered'
-            )
-        del self._configs[connection_id]
-        del self._factories[connection_id]
-
     def get(self, connection_id: str) -> ConnectionFactory:
         """Return the cached ``ConnectionFactory`` for ``connection_id``.
 
@@ -80,14 +72,6 @@ class LlmConnectionRegistry(object):
                 f'connection {connection_id!r} not registered'
             ) from exc
 
-    def has(self, connection_id: str) -> bool:
-        return connection_id in self._configs
-
     def list(self) -> List[LlmConnectionConfig]:
         """Snapshot of currently-registered configs (insertion order)."""
         return list(self._configs.values())
-
-    def clear(self) -> None:
-        """Drop every registration. Provided for tests."""
-        self._configs.clear()
-        self._factories.clear()
