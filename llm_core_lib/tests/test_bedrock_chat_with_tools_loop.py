@@ -214,6 +214,36 @@ class TestBedrockChatWithToolsLoop(unittest.TestCase):
         self.assertEqual(len(invoke_tool.calls), 3)
         self.assertTrue(any('max_tool_call_rounds' in line for line in captured.output))
 
+    def test_bare_string_history_content_is_normalized_to_blocks(self):
+        # Regression: prior-turn history arrives from ChatSession in the
+        # provider-agnostic ``{role, content: <str>}`` replay shape.
+        # Converse rejects bare-string content (ParamValidationError:
+        # "valid types: list, tuple"), so the connection wraps each
+        # string into a ``[{'text': ...}]`` block before the API call.
+        # Already-block content (the current prompt) passes through
+        # unchanged (no double-wrapping).
+        client = MockBedrockClient(converse_script=[
+            make_bedrock_end_turn_response('ok'),
+        ])
+        connection = _real_connection(client)
+        invoke_tool = RecordingInvokeTool()
+
+        connection.chat_with_tools(
+            input_messages=[
+                {'role': 'user', 'content': 'show me a user'},         # history — bare string
+                {'role': 'assistant', 'content': 'which one?'},         # history — bare string
+                {'role': 'user', 'content': [{'text': 'the first'}]},   # current — already blocks
+            ],
+            tools=sample_openai_tools(),
+            instructions='sys',
+            invoke_tool=invoke_tool,
+        )
+
+        sent_messages = client.converse_calls[0]['messages']
+        self.assertEqual(sent_messages[0]['content'], [{'text': 'show me a user'}])
+        self.assertEqual(sent_messages[1]['content'], [{'text': 'which one?'}])
+        self.assertEqual(sent_messages[2]['content'], [{'text': 'the first'}])
+
 
 if __name__ == '__main__':
     unittest.main()

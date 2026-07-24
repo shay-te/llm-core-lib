@@ -144,9 +144,12 @@ class BedrockConnection(Connection):
         Args:
             input_messages: Converse-API messages list in Bedrock
                 format (``[{'role': 'user', 'content': [{'text': ...}]}, ...]``).
-                The caller owns the initial user message; the loop
-                appends the assistant's reply and the user-role
-                ``toolResult`` follow-up as rounds progress.
+                Messages whose ``content`` is a bare string (the
+                provider-agnostic history-replay shape from ChatSession)
+                are normalized to ``[{'text': ...}]`` blocks on entry. The
+                caller owns the initial user message; the loop appends the
+                assistant's reply and the user-role ``toolResult``
+                follow-up as rounds progress.
             tools: OpenAI function-tool schema (the workspace's
                 standard tool shape). Converted to Bedrock's
                 ``toolConfig`` format internally so the caller stays
@@ -167,6 +170,10 @@ class BedrockConnection(Connection):
             response dict and the final messages list.
         """
         effective_logger = logger or logging.getLogger(__name__)
+        # Normalize replayed history (provider-agnostic string content)
+        # into Bedrock content blocks before the first Converse call —
+        # the current prompt + tool-result messages are already blocks.
+        input_messages = [_ensure_bedrock_content_blocks(m) for m in input_messages]
         tool_config = {'tools': _openai_tools_to_bedrock_tool_config(tools)}
         last_response: Any = None
         for _round in range(max_tool_call_rounds):
@@ -309,6 +316,26 @@ def _json_default(obj: Any) -> Any:
     raise TypeError(
         f'Object of type {type(obj).__name__} is not JSON serializable'
     )
+
+
+def _ensure_bedrock_content_blocks(message: dict) -> dict:
+    """Coerce a message's ``content`` into Bedrock Converse block form.
+
+    Prior-turn history arrives from :class:`ChatSession` in its
+    provider-agnostic replay shape ``{role, content: <str>}`` (that
+    string is OpenAI-native and Bedrock-invalid), whereas the current
+    prompt and tool-result messages are already ``[{'text': ...}, ...]``
+    block lists. Converse rejects bare-string ``content``
+    (``ParamValidationError: valid types: list, tuple``), so wrap any
+    string into a single ``[{'text': ...}]`` block; anything already a
+    list is returned unchanged. Returns a NEW dict (never mutates the
+    input) so the caller's pre-call snapshot — used for the positional
+    ``diff_new_messages`` — is left intact.
+    """
+    content = message.get('content')
+    if isinstance(content, str):
+        return {**message, 'content': [{'text': content}]}
+    return message
 
 
 def _openai_tools_to_bedrock_tool_config(openai_tools: list) -> list:
