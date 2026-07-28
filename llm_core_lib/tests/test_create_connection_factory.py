@@ -67,35 +67,6 @@ class TestCreateConnectionFactoryHappyPath(unittest.TestCase):
         self.assertIsInstance(factory, OpenAiConnectionFactory)
 
 
-class TestRawClientExposesInjectedClient(unittest.TestCase):
-    """`raw_client()` returns the same shared SDK client `get()` wraps —
-    the escape hatch host apps use for provider-native tool-calling."""
-
-    def test_openai_raw_client_is_injected_client(self):
-        client = MockOpenAIClient()
-        factory = create_connection_factory(_full(
-            'openai', model='gpt-4o-mini', vision_model='gpt-4o-mini',
-            api_key='sk-test', extra={'client': client},
-        ))
-        self.assertIs(factory.raw_client(), client)
-
-    def test_anthropic_raw_client_is_injected_client(self):
-        client = MockAnthropicClient()
-        factory = create_connection_factory(_full(
-            'anthropic', model='claude-x', vision_model='claude-x',
-            api_key='sk-test', extra={'client': client},
-        ))
-        self.assertIs(factory.raw_client(), client)
-
-    def test_bedrock_raw_client_is_injected_client(self):
-        client = MockBedrockClient()
-        factory = create_connection_factory(_full(
-            'bedrock', model='anthropic.claude-x', vision_model='anthropic.claude-x',
-            region='us-east-1', extra={'client': client},
-        ))
-        self.assertIs(factory.raw_client(), client)
-
-
 class TestCreateConnectionFactoryRejects(unittest.TestCase):
     def test_unknown_provider_raises_invalid_provider(self):
         with self.assertRaises(LlmInvalidProviderError):

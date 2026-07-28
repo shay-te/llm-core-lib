@@ -6,15 +6,21 @@ The companion :class:`BedrockConnectionFactory` in
 """
 import base64
 import json
-from typing import Any, List, Optional, Tuple
+import logging
+from typing import Any, Callable, List, Optional, Tuple
 
 from core_lib.connection.connection import Connection
 
+from llm_core_lib.connections.openai_connection import format_tool_result_for_llm
 from llm_core_lib.errors import LlmConfigError, LlmError, LlmProviderError
 from llm_core_lib.types import LlmCompletion
 
 
 _ANTHROPIC_VERSION = 'bedrock-2023-05-31'
+
+# Matches the OpenAI connection's cap so the per-provider behaviour is
+# uniform from the caller's perspective. See that constant's docstring.
+DEFAULT_MAX_TOOL_CALL_ROUNDS = 100
 
 
 class BedrockConnection(Connection):
@@ -116,6 +122,94 @@ class BedrockConnection(Connection):
 
         # 3. use.
         return chosen
+
+    def chat_with_tools(
+        self,
+        *,
+        input_messages: list,
+        tools: list,
+        instructions: str,
+        invoke_tool: Callable[[str, dict], Any],
+        max_tool_call_rounds: int = DEFAULT_MAX_TOOL_CALL_ROUNDS,
+        logger: Optional[logging.Logger] = None,
+    ) -> Tuple[Any, list]:
+        """Multi-round Bedrock Converse tool-call loop.
+
+        Each round either produces ``stopReason='tool_use'`` (we run
+        every ``toolUse`` block via ``invoke_tool`` and feed the
+        results back) or anything else (we return). Iterative — never
+        recursive — so a long tool sequence cannot exhaust the Python
+        stack. Capped at ``max_tool_call_rounds``.
+
+        Args:
+            input_messages: Converse-API messages list in Bedrock
+                format (``[{'role': 'user', 'content': [{'text': ...}]}, ...]``).
+                Messages whose ``content`` is a bare string (the
+                provider-agnostic history-replay shape from ChatSession)
+                are normalized to ``[{'text': ...}]`` blocks on entry. The
+                caller owns the initial user message; the loop appends the
+                assistant's reply and the user-role ``toolResult``
+                follow-up as rounds progress.
+            tools: OpenAI function-tool schema (the workspace's
+                standard tool shape). Converted to Bedrock's
+                ``toolConfig`` format internally so the caller stays
+                provider-agnostic.
+            instructions: passed as the Converse ``system`` text.
+            invoke_tool: callback ``(name, kwargs) -> result``. The
+                caller's choke point — authorization, gate, scrub,
+                sanitized errors all live there. ``result`` is
+                ``str``-encoded before being fed back as a
+                ``toolResult.content`` text block.
+            max_tool_call_rounds: hard cap; hit-the-cap logs WARNING
+                and returns the in-flight response.
+            logger: destination for round-level debug lines. Defaults
+                to the connection module's logger.
+
+        Returns:
+            ``(response, input_messages)`` — the final Converse
+            response dict and the final messages list.
+        """
+        effective_logger = logger or logging.getLogger(__name__)
+        # Normalize replayed history (provider-agnostic string content)
+        # into Bedrock content blocks before the first Converse call —
+        # the current prompt + tool-result messages are already blocks.
+        input_messages = [_ensure_bedrock_content_blocks(m) for m in input_messages]
+        tool_config = {'tools': _openai_tools_to_bedrock_tool_config(tools)}
+        last_response: Any = None
+        for _round in range(max_tool_call_rounds):
+            response = self._client.converse(
+                modelId=self._model_id,
+                messages=input_messages,
+                system=[{'text': instructions}],
+                toolConfig=tool_config,
+            )
+            last_response = response
+            output_message = response['output']['message']
+            input_messages.append(output_message)
+            if response.get('stopReason') != 'tool_use':
+                return response, input_messages
+            tool_results = []
+            for block in output_message.get('content', []):
+                tool_use = block.get('toolUse')
+                if not tool_use:
+                    continue
+                effective_logger.debug('tool call: %r', tool_use.get('name'))
+                result = invoke_tool(
+                    tool_use.get('name'),
+                    tool_use.get('input') or {},
+                )
+                tool_results.append({
+                    'toolResult': {
+                        'toolUseId': tool_use.get('toolUseId'),
+                        'content': [{'text': format_tool_result_for_llm(result)}],
+                    }
+                })
+            input_messages.append({'role': 'user', 'content': tool_results})
+        effective_logger.warning(
+            'Bedrock tool-call loop hit max_tool_call_rounds (%d); returning early',
+            max_tool_call_rounds,
+        )
+        return last_response, input_messages
 
     def close(self) -> None:
         # boto3 clients don't require explicit close.
@@ -222,3 +316,45 @@ def _json_default(obj: Any) -> Any:
     raise TypeError(
         f'Object of type {type(obj).__name__} is not JSON serializable'
     )
+
+
+def _ensure_bedrock_content_blocks(message: dict) -> dict:
+    """Coerce a message's ``content`` into Bedrock Converse block form.
+
+    Prior-turn history arrives from :class:`ChatSession` in its
+    provider-agnostic replay shape ``{role, content: <str>}`` (that
+    string is OpenAI-native and Bedrock-invalid), whereas the current
+    prompt and tool-result messages are already ``[{'text': ...}, ...]``
+    block lists. Converse rejects bare-string ``content``
+    (``ParamValidationError: valid types: list, tuple``), so wrap any
+    string into a single ``[{'text': ...}]`` block; anything already a
+    list is returned unchanged. Returns a NEW dict (never mutates the
+    input) so the caller's pre-call snapshot — used for the positional
+    ``diff_new_messages`` — is left intact.
+    """
+    content = message.get('content')
+    if isinstance(content, str):
+        return {**message, 'content': [{'text': content}]}
+    return message
+
+
+def _openai_tools_to_bedrock_tool_config(openai_tools: list) -> list:
+    """Translate the OpenAI function-tool schema into Bedrock's
+    Converse ``toolConfig.tools`` shape.
+
+    Kept inside the BedrockConnection module so callers can pass tools
+    in the workspace's standard (OpenAI) shape and not branch on
+    provider. The OpenAI schema lives at the top level of each tool
+    entry (``{'name': ..., 'description': ..., 'parameters': ...}``);
+    Bedrock wraps it in ``toolSpec`` and uses ``inputSchema.json``.
+    """
+    bedrock_tools = []
+    for function in openai_tools:
+        bedrock_tools.append({
+            'toolSpec': {
+                'name': function['name'],
+                'description': function.get('description', ''),
+                'inputSchema': {'json': function['parameters']},
+            }
+        })
+    return bedrock_tools

@@ -102,9 +102,19 @@ from llm_core_lib import BedrockConnectionFactory                               
 
 ## `requirements.txt` is just `core-lib`
 
-Every other dep (`SQLAlchemy`, `alembic`, `omegaconf`, `hydra-core`,
-`boto3`, etc.) comes in transitively through `core-lib`. The three
-LLM SDKs (`openai`, `anthropic`, `boto3`) are declared in
+`core-lib` carries the framework transitively (`SQLAlchemy`,
+`alembic`, `omegaconf`, `hydra-core`, `boto3`, etc.). **No other
+runtime dependency lives here** — in particular this repo does NOT
+depend on Pydantic. The transport-layer ``LLMView`` marker in
+``llm_core_lib.safety.llm_view`` is a plain Python class (no Pydantic
+import); the Pydantic-backed concrete view with
+``ConfigDict(extra='forbid', frozen=True)`` is in
+``agent_core_lib.safety.llm_view`` and that's where the Pydantic
+dependency lives. The split keeps this repo a pure transport library
+and respects the boundary test (``test_boundary.py``) that forbids
+``agent_core_lib`` imports from this side.
+
+The three LLM SDKs (`openai`, `anthropic`, `boto3`) are declared in
 `extras_require` so consumers opt in:
 
 ```bash
@@ -136,3 +146,68 @@ hierarchy.
 `LlmConnectionRegistry` is in-memory by design. Re-register on
 process boot. Don't add a DB-backed implementation here — that
 belongs in a host app or a separate library that *consumes* this one.
+
+## Test file organization — one TestCase per file, filename mirrors the class
+
+**Every test file in this repo owns exactly one `unittest.TestCase`
+subclass, and the filename is the snake_case form of that class
+name.** This is a workspace-wide rule — see the "Test file
+organization" sub-section of "Coding conventions (workspace-wide, all
+Python repos)" in `architecture.md` for the full rationale, the
+helper-module pattern, and the canonical examples.
+
+**A file that holds more than one `TestCase` is a defect.** Any time
+you materially touch such a file — adding a test, fixing a flake,
+renaming a fixture — split it before landing the change. "Materially
+touch" includes the operator opening a review thread on it; a
+reviewer flagging the multi-class shape is itself a trigger to split.
+Don't add new tests to an already-multi-class file: split first, add
+second, in the same PR.
+
+The helper-module pattern: shared fixtures (a stub view, a fake
+service, a sample payload) live in a sibling `<topic>_helpers.py`
+module **without** a `test_` prefix so the discoverers (`unittest
+discover`, `pytest`) skip it. Canonical example:
+`safety_llm_view_helpers.py` is shared by
+`test_llm_view_is_a_class.py` and
+`test_llm_view_isinstance_check.py`.
+
+Genuinely pre-existing multi-class files (`test_boundary.py`,
+`test_exports.py`) are **not** required to be split retroactively —
+apply the rule forward, with new files and any time you're materially
+touching an old one. The `test_safety_*` set was added in this PR
+(UNA-2727) and the remaining multi-class files
+(`test_safety_payload_gate.py` 6, `test_safety_adversarial.py` 13)
+should be split into one-TestCase-per-file the next time they're
+materially touched — documented as a debt, not endorsement.
+`test_safety_llm_view.py` has been split (see the canonical example
+above).
+
+## Tests prefer real collaborators over mocks
+
+**Mock at infrastructure boundaries, not at internal seams.**
+Workspace-wide rule — see the "Tests prefer real collaborators over
+mocks" sub-section of "Coding conventions (workspace-wide, all
+Python repos)" in `architecture.md` for the full rule.
+
+This repo is the **canonical example** for the workspace-wide rule —
+the `*ConnectionFactory` / `*Connection` tests in
+`llm_core_lib/tests/test_connections.py` run the real factory and the
+real connection end-to-end; only the SDK client (OpenAI / Anthropic /
+Bedrock) is mocked, via the existing fakes under
+`llm_core_lib/tests/mock/` (`MockOpenAIClient`,
+`MockAnthropicClient`, `MockBedrockClient`). The response-parsing
+logic, the prompt-forwarding-verbatim guarantees, the registry
+plumbing — all of those exercise the real code paths against
+synthetic SDK payloads.
+
+For new tests in this repo:
+- The SUT's direct collaborators (a factory's `Connection`, a
+  registry's stored configs) are pure Python — wire the real types.
+- The legitimate mock surfaces here are the **SDK client** (use the
+  `MockOpenAIClient` / `MockAnthropicClient` / `MockBedrockClient`
+  shape — they're already in `tests/mock/`), the **logger**, and the
+  **clock** if a test asserts on timing.
+- Pre-existing tests are **not** required to be rewritten — apply
+  the rule forward, with new tests and any time you're materially
+  rewriting an old one.
