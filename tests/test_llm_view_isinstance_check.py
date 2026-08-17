@@ -17,7 +17,7 @@ import unittest
 
 from llm_core_lib.safety.llm_view import LLMView
 
-from llm_core_lib.tests.safety_llm_view_helpers import StubLLMView
+from tests.safety_llm_view_helpers import StubLLMView
 
 
 class TestLLMViewIsinstanceCheck(unittest.TestCase):

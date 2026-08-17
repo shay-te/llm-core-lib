@@ -7,7 +7,7 @@ from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionF
 from llm_core_lib.errors import LlmConfigError, LlmDuplicateConnectionError, LlmInvalidProviderError, LlmMissingConnectionError
 from llm_core_lib.registry import LlmConnectionRegistry
 from llm_core_lib.types import LlmConnectionConfig
-from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
+from tests.mock.openai_client import MockOpenAIClient
 
 
 def _ok_openai(_id: str = 'openai-default') -> LlmConnectionConfig:

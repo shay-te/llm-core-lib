@@ -13,9 +13,9 @@ from llm_core_lib.connections.openai_connection import OpenAiConnection
 from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
 from llm_core_lib.errors import LlmConfigError, LlmProviderError
 from llm_core_lib.types import LlmCompletion
-from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
-from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
-from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
+from tests.mock.anthropic_client import MockAnthropicClient
+from tests.mock.bedrock_client import MockBedrockClient
+from tests.mock.openai_client import MockOpenAIClient
 
 
 # ---- OpenAI -----------------------------------------------------------

@@ -20,11 +20,11 @@ import unittest
 from llm_core_lib.connections.bedrock_connection import BedrockConnection
 from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
 
-from llm_core_lib.tests.chat_with_tools_helpers import (
+from tests.chat_with_tools_helpers import (
     RecordingInvokeTool,
     sample_openai_tools,
 )
-from llm_core_lib.tests.mock.bedrock_client import (
+from tests.mock.bedrock_client import (
     MockBedrockClient,
     make_bedrock_tool_use_response,
     make_bedrock_end_turn_response,
