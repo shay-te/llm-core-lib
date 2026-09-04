@@ -18,7 +18,7 @@ import unittest
 from llm_core_lib.connections.openai_connection import OpenAiConnection
 from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionFactory
 
-from tests.chat_with_tools_helpers import (
+from tests.helpers.chat_with_tools_helpers import (
     RecordingInvokeTool,
     sample_openai_tools,
 )

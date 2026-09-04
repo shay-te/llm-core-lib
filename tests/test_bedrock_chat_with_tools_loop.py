@@ -20,7 +20,7 @@ import unittest
 from llm_core_lib.connections.bedrock_connection import BedrockConnection
 from llm_core_lib.connections.bedrock_connection_factory import BedrockConnectionFactory
 
-from tests.chat_with_tools_helpers import (
+from tests.helpers.chat_with_tools_helpers import (
     RecordingInvokeTool,
     sample_openai_tools,
 )
