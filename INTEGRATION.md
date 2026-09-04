@@ -210,5 +210,5 @@ sanity-check the boundary the same way `llm-core-lib`'s suite does:
 rg "^\s*(?:from|import)\s+(agent_core_lib|claude_core_lib|codex_core_lib|openhands_core_lib|kato_core_lib)\b" llm_core_lib/
 
 # llm-core-lib's own boundary + verbatim-forward + vision/embed tests:
-python -m unittest discover -s llm_core_lib/tests -p 'test_*.py'
+python -m unittest discover -s tests -p 'test_*.py'
 ```

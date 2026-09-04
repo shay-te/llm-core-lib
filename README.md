@@ -55,7 +55,7 @@ shaping. Those belong in `agent-core-lib`.
 > **`llm-core-lib` must not import `agent-core-lib`** (or
 > `claude_core_lib` / `codex_core_lib` / `openhands_core_lib` /
 > `kato_core_lib`). This is asserted at test time by
-> [`tests/test_boundary.py`](llm_core_lib/tests/test_boundary.py),
+> [`tests/test_boundary.py`](tests/test_boundary.py),
 > which AST-parses every module under `llm_core_lib/` and fails the
 > suite on any forbidden import.
 
@@ -354,7 +354,7 @@ pre-registers every entry on the shared registry.
 
 All tests are **mocked**. Each factory accepts a `client` key in its
 config dict; the test suite uses the per-provider mocks under
-[`llm_core_lib/tests/mock/`](llm_core_lib/tests/mock/)
+[`tests/mock/`](tests/mock/)
 (`mock/openai_client.py` → `MockOpenAIClient`,
 `mock/anthropic_client.py` → `MockAnthropicClient`,
 `mock/bedrock_client.py` → `MockBedrockClient`), each of which mirrors
@@ -365,7 +365,7 @@ no test reaches the network.
 When `llm-core-lib` is installed via `pip` the test command is just:
 
 ```bash
-python -m unittest discover -s llm_core_lib/tests -p 'test_*.py'
+python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 When running from an uninstalled checkout in the Kato workspace
@@ -373,7 +373,7 @@ When running from an uninstalled checkout in the Kato workspace
 
 ```bash
 PYTHONPATH=/Users/shaytessler/Desktop/dev_kato/UNA-2719/core-lib:/Users/shaytessler/Desktop/dev_kato/UNA-2719/llm-core-lib \
-    python -m unittest discover -s llm_core_lib/tests -p 'test_*.py'
+    python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 Coverage targets the package modules (`llm_core_lib/*.py`,
@@ -395,7 +395,7 @@ when they need an LLM backend.
   `codex_core_lib`, `openhands_core_lib`, or `kato_core_lib` — agent
   workflows compose those upstream and pass the prepared
   `(prompt, system)` pair down. Enforced by
-  [`tests/test_boundary.py`](llm_core_lib/tests/test_boundary.py).
+  [`tests/test_boundary.py`](tests/test_boundary.py).
 - Backend SDK imports (`openai`, `anthropic`, `boto3`) are
   function-local inside each factory — the base package depends on
   none of them at import time.

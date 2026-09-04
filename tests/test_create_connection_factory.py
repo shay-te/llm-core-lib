@@ -7,9 +7,9 @@ from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionF
 from llm_core_lib.errors import LlmConfigError, LlmInvalidProviderError
 from llm_core_lib.factory import create_connection_factory
 from llm_core_lib.types import LlmConnectionConfig
-from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
-from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
-from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
+from tests.mock.anthropic_client import MockAnthropicClient
+from tests.mock.bedrock_client import MockBedrockClient
+from tests.mock.openai_client import MockOpenAIClient
 
 
 # Fake clients are injected through ``extra={'client': ...}`` so these

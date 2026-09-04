@@ -35,9 +35,9 @@ from llm_core_lib.connections.openai_connection_factory import OpenAiConnectionF
 from llm_core_lib.registry import LlmConnectionRegistry
 from llm_core_lib.types import LlmConnectionConfig
 from llm_core_lib.registry import LlmConnectionRegistry as _RegistryClass
-from llm_core_lib.tests.mock.anthropic_client import MockAnthropicClient
-from llm_core_lib.tests.mock.bedrock_client import MockBedrockClient
-from llm_core_lib.tests.mock.openai_client import MockOpenAIClient
+from tests.mock.anthropic_client import MockAnthropicClient
+from tests.mock.bedrock_client import MockBedrockClient
+from tests.mock.openai_client import MockOpenAIClient
 
 
 FORBIDDEN_TOP_LEVEL_PACKAGES = frozenset({

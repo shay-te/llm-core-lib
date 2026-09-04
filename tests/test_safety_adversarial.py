@@ -27,11 +27,6 @@ from __future__ import annotations
 import logging
 import unittest
 
-# Importing the test package first activates the core_lib stub from
-# ``llm_core_lib/tests/__init__.py`` — needed locally so the gate's
-# StatusCodeException base resolves without the framework installed.
-import llm_core_lib.tests  # noqa: F401
-
 from llm_core_lib.safety.llm_view import RefLLMView
 from llm_core_lib.safety.payload_gate import (
     UnsafeToolResultError,

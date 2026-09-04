@@ -165,12 +165,17 @@ Don't add new tests to an already-multi-class file: split first, add
 second, in the same PR.
 
 The helper-module pattern: shared fixtures (a stub view, a fake
-service, a sample payload) live in a sibling `<topic>_helpers.py`
-module **without** a `test_` prefix so the discoverers (`unittest
-discover`, `pytest`) skip it. Canonical example:
-`safety_llm_view_helpers.py` is shared by
+service, a sample payload) live under `tests/helpers/` in a
+`<topic>_helpers.py` module **without** a `test_` prefix so the
+discoverers (`unittest discover`, `pytest`) skip it. Canonical
+example: `tests/helpers/safety_llm_view_helpers.py` is shared by
 `test_llm_view_is_a_class.py` and
 `test_llm_view_isinstance_check.py`.
+
+Support modules never sit flat next to the `test_*.py` files — they
+go in a subpackage (`tests/helpers/`, `tests/mock/`), matching the
+`tests/helpers/` + `tests/utils/` layout used by the sibling core
+libs (`custom-field-core-lib`, `task-core-lib`).
 
 Genuinely pre-existing multi-class files (`test_boundary.py`,
 `test_exports.py`) are **not** required to be split retroactively —
@@ -192,10 +197,10 @@ Python repos)" in `architecture.md` for the full rule.
 
 This repo is the **canonical example** for the workspace-wide rule —
 the `*ConnectionFactory` / `*Connection` tests in
-`llm_core_lib/tests/test_connections.py` run the real factory and the
+`tests/test_connections.py` run the real factory and the
 real connection end-to-end; only the SDK client (OpenAI / Anthropic /
 Bedrock) is mocked, via the existing fakes under
-`llm_core_lib/tests/mock/` (`MockOpenAIClient`,
+`tests/mock/` (`MockOpenAIClient`,
 `MockAnthropicClient`, `MockBedrockClient`). The response-parsing
 logic, the prompt-forwarding-verbatim guarantees, the registry
 plumbing — all of those exercise the real code paths against

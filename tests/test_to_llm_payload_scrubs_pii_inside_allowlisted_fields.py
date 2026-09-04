@@ -26,7 +26,7 @@ from unittest import mock
 
 from llm_core_lib.safety.payload_gate import to_llm_payload
 
-from llm_core_lib.tests.gate_pii_helpers import CommentStubLLMView
+from tests.helpers.gate_pii_helpers import CommentStubLLMView
 
 
 class TestToLlmPayloadScrubsPiiInsideAllowlistedFields(unittest.TestCase):
