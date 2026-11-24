@@ -109,7 +109,10 @@ def to_llm_payload(
     After the allowlist projection, the result is passed through
     :meth:`PiiService.scrub` so any free-text PII inside allowlisted
     fields is rewritten to ``[redacted:<pattern>]`` before the LLM
-    ever sees it.
+    ever sees it. This is the gate's only partial mark: an email keeps its
+    host, a phone its country code and GPS its region, as a clue for the
+    matchmaker (a credit card never). History, saved messages and errors
+    are full marks.
 
     Args:
         result: tool's raw return value.
@@ -121,10 +124,13 @@ def to_llm_payload(
             locate the source (e.g. ``'admin tool result: search_users'``).
     """
     projected = _project(result)
+    # The one partial mark of the gate: the matchmaker reads this data through the AI and keeps a clue (an email's
+    # host, a phone's country code). History, saved messages and errors stay full.
     return _PII_SERVICE.scrub(
         projected,
         audit_logger=audit_logger,
         context=context,
+        is_partial_mask=True,
     )
 
 

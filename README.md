@@ -434,7 +434,9 @@ After projection, the payload runs through `PiiService.scrub()` (from
 `pii-core-lib`) which walks the dict tree and rewrites credentials /
 emails / SSNs / phone numbers found inside an allowlisted string field
 to `[redacted:<pattern>]`. Fires an audit log whenever a redaction
-happens.
+happens. Only this tool-result scrub (`to_llm_payload`) keeps a clue,
+through `is_partial_mask=True` (an email's host, a phone's country code);
+scrubbed history, saved messages and error envelopes are full marks.
 
 ### 3. User-error envelope is also scrubbed
 
